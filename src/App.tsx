@@ -6,7 +6,7 @@ import MatchDay from './components/MatchDay';
 import type { GameState } from './game/types';
 import TeamSelect from './components/TeamSelect';
 import { createNewGameFrom, createTeamWithGeneratedSquad } from './game/generator';
-import { fetchLeagueFromApiFootball, fetchLeagueTeamsFromStandings, fetchLeagueSeasons } from './game/api';
+import { fetchLeagueFromApiFootball, fetchLeagueTeamsFromStandings } from './game/api';
 import { generateRoundRobinSchedule } from './game/schedule';
 import { loadState, saveState, clearState } from './game/storage';
 import { loadLeagueCache, saveLeagueCache } from './game/cache';
@@ -20,61 +20,80 @@ export default function App() {
   const [pending, setPending] = useState<{ teams: Record<string, Team>; league: League } | null>(null);
   const [tab, setTab] = useState<Tab>('dashboard');
 
-  const cacheId = 'league-61';
+  // Saison forcée
+  const forcedSeason = 2022;
+  const cacheId = `league-61-${forcedSeason}`;
+  const CACHE_FOREVER = Number.POSITIVE_INFINITY;
+
+  // Garantit un championnat à 20 équipes en complétant si besoin
+  const ensureTwentyTeams = (pack: { teams: Record<string, Team>; league: League }): { teams: Record<string, Team>; league: League } => {
+    const desired = 20;
+    let { teams, league } = pack;
+    const currentIds = [...league.teamIds];
+    if (currentIds.length >= desired) {
+      return { teams, league: { ...league, teamIds: currentIds.slice(0, desired) } };
+    }
+    const missing = desired - currentIds.length;
+    const additions: string[] = [];
+    for (let i = 0; i < missing; i++) {
+      const idx = currentIds.length + i + 1;
+      const extra = createTeamWithGeneratedSquad(`Club ${idx}`, `C${String(idx).padStart(2, '0')}`);
+      teams = { ...teams, [extra.id]: extra };
+      additions.push(extra.id);
+    }
+    league = { ...league, teamIds: [...currentIds, ...additions] };
+    return { teams, league };
+  };
 
   const fetchPendingFromApi = async () => {
     const apiKey = (import.meta as any).env?.VITE_API_FOOTBALL_KEY as string | undefined;
     try {
       if (apiKey && apiKey.trim().length > 0) {
-        console.log('[fm-lite] using API-FOOTBALL with key present');
+        console.log('[fm-lite] using API-FOOTBALL with key present (forced season)', forcedSeason);
         const leagueId = 61;
-        const seasonsFromApi = await fetchLeagueSeasons(leagueId, apiKey);
-        const fallbackYears = [2025, 2024, 2023, 2022, 2021];
-        const seasonsToTry = Array.from(new Set([...seasonsFromApi, ...fallbackYears])).sort((a, b) => b - a);
-        for (const season of seasonsToTry) {
-          console.log('[fm-lite] trying league', { leagueId, season });
-          try {
-            const { teams, league } = await fetchLeagueFromApiFootball(leagueId, season, apiKey);
-            const mergedTeams: Record<string, any> = {};
-            const teamIds: string[] = [];
-            for (const id of league.teamIds) {
-              const apiTeam = teams[id];
-              if (!apiTeam) continue;
-              const built = createTeamWithGeneratedSquad(apiTeam.name, apiTeam.shortName, apiTeam.logoUrl);
-              mergedTeams[built.id] = built;
-              teamIds.push(built.id);
-            }
-            if (teamIds.length > 0) {
-              const pendingLeague = { ...league, id: crypto.randomUUID(), teamIds, name: `Ligue 1 (API ${season})`, schedule: [] };
-              const pendingPack = { teams: mergedTeams, league: pendingLeague };
-              console.log('[fm-lite] pending from API', { count: teamIds.length, season });
-              setPending(pendingPack);
-              saveLeagueCache(cacheId, pendingPack);
-              return;
-            }
-          } catch {}
-          try {
-            const viaStandings = await fetchLeagueTeamsFromStandings(leagueId, season, apiKey);
-            const mergedTeams2: Record<string, any> = {};
-            const teamIds2: string[] = [];
-            for (const id of viaStandings.league.teamIds) {
-              const apiTeam = viaStandings.teams[id];
-              if (!apiTeam) continue;
-              const built = createTeamWithGeneratedSquad(apiTeam.name, apiTeam.shortName, apiTeam.logoUrl);
-              mergedTeams2[built.id] = built;
-              teamIds2.push(built.id);
-            }
-            if (teamIds2.length > 0) {
-              const pendingLeague = { ...viaStandings.league, id: crypto.randomUUID(), teamIds: teamIds2, name: `Ligue 1 (API ${season})`, schedule: [] };
-              const pendingPack = { teams: mergedTeams2, league: pendingLeague };
-              console.log('[fm-lite] pending from API via standings', { count: teamIds2.length, season });
-              setPending(pendingPack);
-              saveLeagueCache(cacheId, pendingPack);
-              return;
-            }
-          } catch {}
-        }
-        console.warn('[fm-lite] API returned 0 teams for all tried seasons');
+        // 1) Essai principal: endpoint teams
+        try {
+          const { teams, league } = await fetchLeagueFromApiFootball(leagueId, forcedSeason, apiKey);
+          const mergedTeams: Record<string, any> = {};
+          const teamIds: string[] = [];
+          for (const id of league.teamIds) {
+            const apiTeam = teams[id];
+            if (!apiTeam) continue;
+            const built = createTeamWithGeneratedSquad(apiTeam.name, apiTeam.shortName, apiTeam.logoUrl);
+            mergedTeams[built.id] = built;
+            teamIds.push(built.id);
+          }
+          if (teamIds.length > 0) {
+            const pendingLeague = { ...league, id: crypto.randomUUID(), teamIds, name: `Ligue 1 (API ${forcedSeason})`, schedule: [] };
+            const pendingPack = ensureTwentyTeams({ teams: mergedTeams, league: pendingLeague });
+            console.log('[fm-lite] pending from API', { count: teamIds.length, season: forcedSeason });
+            setPending(pendingPack);
+            saveLeagueCache(cacheId, pendingPack);
+            return;
+          }
+        } catch {}
+        // 2) Fallback: standings
+        try {
+          const viaStandings = await fetchLeagueTeamsFromStandings(leagueId, forcedSeason, apiKey);
+          const mergedTeams2: Record<string, any> = {};
+          const teamIds2: string[] = [];
+          for (const id of viaStandings.league.teamIds) {
+            const apiTeam = viaStandings.teams[id];
+            if (!apiTeam) continue;
+            const built = createTeamWithGeneratedSquad(apiTeam.name, apiTeam.shortName, apiTeam.logoUrl);
+            mergedTeams2[built.id] = built;
+            teamIds2.push(built.id);
+          }
+          if (teamIds2.length > 0) {
+            const pendingLeague = { ...viaStandings.league, id: crypto.randomUUID(), teamIds: teamIds2, name: `Ligue 1 (API ${forcedSeason})`, schedule: [] };
+            const pendingPack = ensureTwentyTeams({ teams: mergedTeams2, league: pendingLeague });
+            console.log('[fm-lite] pending from API via standings', { count: teamIds2.length, season: forcedSeason });
+            setPending(pendingPack);
+            saveLeagueCache(cacheId, pendingPack);
+            return;
+          }
+        } catch {}
+        console.warn('[fm-lite] API returned 0 teams for forced season', forcedSeason);
       }
     } catch (e) {
       console.warn('[fm-lite] API-FOOTBALL failed', e);
@@ -92,10 +111,10 @@ export default function App() {
     } else {
       // Essaye d'abord l'API-FOOTBALL; sinon on montre un écran vide avec message
       // 0) tente le cache local (évite des requêtes inutiles)
-      const cached = loadLeagueCache(cacheId, 1000 * 60 * 60 * 24 * 7); // 7 jours
+      const cached = loadLeagueCache(cacheId, CACHE_FOREVER);
       if (cached) {
         console.log('[fm-lite] using cached league', { count: cached.league.teamIds.length });
-        setPending(cached);
+        setPending(ensureTwentyTeams(cached));
         return;
       }
       void fetchPendingFromApi();
@@ -109,10 +128,10 @@ export default function App() {
   const reset = () => {
     clearState();
     setState(null);
-    const cached = loadLeagueCache(cacheId, 1000 * 60 * 60 * 24 * 7);
+    const cached = loadLeagueCache(cacheId, CACHE_FOREVER);
     if (cached) {
       console.log('[fm-lite] using cached league (reset)', { count: cached.league.teamIds.length });
-      setPending(cached);
+      setPending(ensureTwentyTeams(cached));
     } else {
       setPending({
         teams: {},
