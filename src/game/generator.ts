@@ -1,4 +1,5 @@
 import type { GameState, League, Player, Team } from './types';
+import { getTeamBaseOverall } from './data/ratings';
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -23,26 +24,43 @@ function generateTeamName(): { name: string; shortName: string } {
   return { name: `${city} ${animal}`, shortName: city.slice(0, 3).toUpperCase() };
 }
 
-function generatePlayer(position: Player['position']): Player {
-  const base = position === 'GK' ? 60 : 55;
-  const variance = randomInt(-15, 20);
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function gaussian(mean: number, stdDev: number): number {
+  // Box–Muller
+  const u = 1 - Math.random();
+  const v = 1 - Math.random();
+  const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  return mean + z * stdDev;
+}
+
+function generatePlayer(position: Player['position'], targetAvg = 72): Player {
+  // Légers biais par poste (GK souvent un peu plus haut que la moyenne de l'équipe)
+  const posBias =
+    position === 'GK' ? 1.5 :
+    position === 'DEF' ? -0.5 :
+    position === 'MID' ? 0.0 : 0.5; // FWD
+  const mean = targetAvg + posBias;
+  const overall = Math.round(clamp(gaussian(mean, 4.5), 60, 90));
   return {
     id: crypto.randomUUID(),
     name: generateName(),
     age: randomInt(17, 35),
     position,
-    overall: Math.max(40, Math.min(95, base + variance)),
+    overall,
     fitness: randomInt(70, 100)
   };
 }
 
-function generateSquad(): Player[] {
+function generateSquad(targetAvg = 72): Player[] {
   const players: Player[] = [];
-  players.push(generatePlayer('GK'));
-  players.push(generatePlayer('GK'));
-  for (let i = 0; i < 8; i++) players.push(generatePlayer('DEF'));
-  for (let i = 0; i < 8; i++) players.push(generatePlayer('MID'));
-  for (let i = 0; i < 6; i++) players.push(generatePlayer('FWD'));
+  players.push(generatePlayer('GK', targetAvg));
+  players.push(generatePlayer('GK', targetAvg));
+  for (let i = 0; i < 8; i++) players.push(generatePlayer('DEF', targetAvg));
+  for (let i = 0; i < 8; i++) players.push(generatePlayer('MID', targetAvg));
+  for (let i = 0; i < 6; i++) players.push(generatePlayer('FWD', targetAvg));
   return players;
 }
 
@@ -56,7 +74,7 @@ export function generateLeague(numTeams = 10): { teams: Record<string, Team>; le
   const teamIds: string[] = [];
   for (let i = 0; i < numTeams; i++) {
     const { name, shortName } = generateTeamName();
-    const players = generateSquad();
+    const players = generateSquad(72);
     const team: Team = {
       id: crypto.randomUUID(),
       name,
@@ -104,7 +122,8 @@ export function createNewGameFrom(teams: Record<string, Team>, league: League, u
 
 // Utilitaire: crée une équipe avec un effectif généré et une force calculée
 export function createTeamWithGeneratedSquad(name: string, shortName: string, logoUrl?: string): Team {
-  const players = generateSquad();
+  const target = getTeamBaseOverall(name);
+  const players = generateSquad(target);
   return {
     id: crypto.randomUUID(),
     name,

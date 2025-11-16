@@ -23,7 +23,6 @@ export default function App() {
   // Saison forcée
   const forcedSeason = 2022;
   const cacheId = `league-61-${forcedSeason}`;
-  const CACHE_FOREVER = Number.POSITIVE_INFINITY;
 
   // Garantit un championnat à 20 équipes en complétant si besoin
   const ensureTwentyTeams = (pack: { teams: Record<string, Team>; league: League }): { teams: Record<string, Team>; league: League } => {
@@ -111,7 +110,7 @@ export default function App() {
     } else {
       // Essaye d'abord l'API-FOOTBALL; sinon on montre un écran vide avec message
       // 0) tente le cache local (évite des requêtes inutiles)
-      const cached = loadLeagueCache(cacheId, CACHE_FOREVER);
+      const cached = loadLeagueCache(cacheId, 1000 * 60 * 60 * 24 * 7); // 7 jours
       if (cached) {
         console.log('[fm-lite] using cached league', { count: cached.league.teamIds.length });
         setPending(ensureTwentyTeams(cached));
@@ -128,7 +127,7 @@ export default function App() {
   const reset = () => {
     clearState();
     setState(null);
-    const cached = loadLeagueCache(cacheId, CACHE_FOREVER);
+    const cached = loadLeagueCache(cacheId, 1000 * 60 * 60 * 24 * 7);
     if (cached) {
       console.log('[fm-lite] using cached league (reset)', { count: cached.league.teamIds.length });
       setPending(ensureTwentyTeams(cached));
