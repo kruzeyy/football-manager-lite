@@ -3,6 +3,7 @@ import Dashboard from './components/Dashboard';
 import SquadView from './components/SquadView';
 import FixturesView from './components/FixturesView';
 import MatchDay from './components/MatchDay';
+import TransfersView from './components/TransfersView';
 import type { GameState } from './game/types';
 import TeamSelect from './components/TeamSelect';
 import { createNewGameFrom, createTeamWithGeneratedSquad } from './game/generator';
@@ -13,7 +14,7 @@ import { loadLeagueCache, saveLeagueCache } from './game/cache';
 import './index.css';
 import type { League, Team } from './game/types';
 
-type Tab = 'dashboard' | 'squad' | 'fixtures' | 'matchday';
+type Tab = 'dashboard' | 'squad' | 'fixtures' | 'matchday' | 'transfers';
 
 export default function App() {
   const [state, setState] = useState<GameState | null>(null);
@@ -165,6 +166,8 @@ export default function App() {
         return <FixturesView state={state} />;
       case 'matchday':
         return <MatchDay state={state} setState={setState} />;
+      case 'transfers':
+        return <TransfersView state={state} setState={setState} />;
       default:
         return null;
     }
@@ -183,6 +186,7 @@ export default function App() {
             <button className={tab === 'squad' ? 'active' : ''} onClick={() => setTab('squad')}>Effectif</button>
             <button className={tab === 'fixtures' ? 'active' : ''} onClick={() => setTab('fixtures')}>Calendrier</button>
             <button className={tab === 'matchday' ? 'active' : ''} onClick={() => setTab('matchday')}>Jour de match</button>
+            <button className={tab === 'transfers' ? 'active' : ''} onClick={() => setTab('transfers')}>Transfert</button>
           </>
         )}
         <button onClick={reset} style={{ marginLeft: 12 }}>Nouvelle partie</button>

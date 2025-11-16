@@ -50,7 +50,14 @@ function generatePlayer(position: Player['position'], targetAvg = 72): Player {
     age: randomInt(17, 35),
     position,
     overall,
-    fitness: randomInt(70, 100)
+    fitness: randomInt(70, 100),
+    stats: {
+      matchesPlayed: 0,
+      goals: 0,
+      assists: 0,
+      yellowCards: 0,
+      redCards: 0
+    }
   };
 }
 
@@ -64,8 +71,64 @@ function generateSquad(targetAvg = 72): Player[] {
   return players;
 }
 
-function computeStrength(players: Player[]): number {
-  const avg = players.reduce((s, p) => s + p.overall, 0) / players.length;
+// Calcule le budget d'une équipe en fonction de sa note (style FIFA)
+// Budgets varient de ~5M€ (équipes faibles) à ~50M€ (grandes équipes)
+export function calculateTeamBudget(strength: number): number {
+  // Formule linéaire: budget = base + (strength - 60) * multiplicateur
+  // Pour strength 60: ~5M€
+  // Pour strength 84: ~50M€
+  const baseBudget = 5_000_000; // Budget minimum
+  const maxBudget = 50_000_000; // Budget maximum
+  const minStrength = 60;
+  const maxStrength = 84;
+  
+  // Clamp la force entre 60 et 84
+  const clampedStrength = Math.max(minStrength, Math.min(maxStrength, strength));
+  
+  // Calcul linéaire
+  const ratio = (clampedStrength - minStrength) / (maxStrength - minStrength);
+  const budget = baseBudget + (maxBudget - baseBudget) * ratio;
+  
+  // Arrondir à 0.5M€ près pour plus de réalisme
+  return Math.round(budget / 500_000) * 500_000;
+}
+
+// Calcule la note d'équipe style FIFA basée sur les meilleurs joueurs de chaque poste
+export function computeStrength(players: Player[]): number {
+  if (players.length === 0) return 60;
+  
+  // Sélectionner les meilleurs joueurs de chaque poste (XI type)
+  const byOverallDesc = (a: Player, b: Player) => b.overall - a.overall;
+  const gk = players.filter(p => p.position === 'GK').sort(byOverallDesc).slice(0, 1);
+  const def = players.filter(p => p.position === 'DEF').sort(byOverallDesc).slice(0, 4);
+  const mid = players.filter(p => p.position === 'MID').sort(byOverallDesc).slice(0, 3);
+  const fwd = players.filter(p => p.position === 'FWD').sort(byOverallDesc).slice(0, 3);
+  
+  // Si on n'a pas assez de joueurs, compléter avec les meilleurs disponibles
+  const xi = [...gk, ...def, ...mid, ...fwd];
+  if (xi.length < 11) {
+    const remaining = players.filter(p => !xi.includes(p)).sort(byOverallDesc);
+    xi.push(...remaining.slice(0, 11 - xi.length));
+  }
+  
+  // Calculer la moyenne pondérée style FIFA
+  // Pondération: GK (1), DEF (4), MID (3), FWD (3)
+  let totalWeighted = 0;
+  let totalWeight = 0;
+  
+  gk.forEach(p => { totalWeighted += p.overall * 1; totalWeight += 1; });
+  def.forEach(p => { totalWeighted += p.overall * 1; totalWeight += 1; });
+  mid.forEach(p => { totalWeighted += p.overall * 1; totalWeight += 1; });
+  fwd.forEach(p => { totalWeighted += p.overall * 1; totalWeight += 1; });
+  
+  // Si on a moins de 11 joueurs, ajuster le poids
+  if (xi.length < 11) {
+    const avg = totalWeighted / totalWeight;
+    return Math.round(avg);
+  }
+  
+  const avg = totalWeighted / totalWeight;
+  // Arrondir à l'entier le plus proche
   return Math.round(avg);
 }
 
@@ -75,16 +138,17 @@ export function generateLeague(numTeams = 10): { teams: Record<string, Team>; le
   for (let i = 0; i < numTeams; i++) {
     const { name, shortName } = generateTeamName();
     const players = generateSquad(72);
+    const strength = computeStrength(players);
     const team: Team = {
       id: crypto.randomUUID(),
       name,
       shortName,
       players,
-      strength: computeStrength(players),
+      strength,
       points: 0,
       goalsFor: 0,
       goalsAgainst: 0,
-      funds: 50_000_000
+      funds: calculateTeamBudget(strength)
     };
     teams[team.id] = team;
     teamIds.push(team.id);
@@ -124,16 +188,17 @@ export function createNewGameFrom(teams: Record<string, Team>, league: League, u
 export function createTeamWithGeneratedSquad(name: string, shortName: string, logoUrl?: string): Team {
   const target = getTeamBaseOverall(name);
   const players = generateSquad(target);
+  const strength = computeStrength(players);
   return {
     id: crypto.randomUUID(),
     name,
     shortName,
     logoUrl,
     players,
-    strength: computeStrength(players),
+    strength,
     points: 0,
     goalsFor: 0,
     goalsAgainst: 0,
-    funds: 50_000_000
+    funds: calculateTeamBudget(strength)
   };
 }

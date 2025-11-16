@@ -1,4 +1,6 @@
 import type { League, Team } from './types';
+import { getTeamBaseOverall } from './data/ratings';
+import { calculateTeamBudget } from './generator';
 
 type ApiFootballTeam = {
   team: {
@@ -36,6 +38,8 @@ export async function fetchLeagueFromApiFootball(leagueId: number, season: numbe
     if (!t || !t.name) continue;
     const id = String(t.id ?? crypto.randomUUID());
     const short = (t.code && t.code.trim().length >= 2 ? t.code.trim().toUpperCase() : t.name.slice(0, 3).toUpperCase());
+    // Budget basé sur la note attendue de l'équipe (sera recalculé après génération de l'effectif)
+    const expectedStrength = getTeamBaseOverall(t.name);
     const team: Team = {
       id,
       name: t.name,
@@ -43,11 +47,11 @@ export async function fetchLeagueFromApiFootball(leagueId: number, season: numbe
       logoUrl: t.logo ?? undefined,
       // effectif généré plus tard par notre générateur
       players: [],
-      strength: 0,
+      strength: expectedStrength, // Force temporaire basée sur le nom
       points: 0,
       goalsFor: 0,
       goalsAgainst: 0,
-      funds: 50_000_000
+      funds: calculateTeamBudget(expectedStrength)
     };
     teams[id] = team;
     teamIds.push(id);
@@ -104,17 +108,19 @@ export async function fetchLeagueTeamsFromStandings(leagueId: number, season: nu
     if (!t || !t.name) continue;
     const id = String(t.id ?? crypto.randomUUID());
     const short = t.name.slice(0, 3).toUpperCase();
+    // Budget basé sur la note attendue de l'équipe (sera recalculé après génération de l'effectif)
+    const expectedStrength = getTeamBaseOverall(t.name);
     teams[id] = {
       id,
       name: t.name,
       shortName: short,
       logoUrl: t.logo ?? undefined,
       players: [],
-      strength: 0,
+      strength: expectedStrength, // Force temporaire basée sur le nom
       points: 0,
       goalsFor: 0,
       goalsAgainst: 0,
-      funds: 50_000_000
+      funds: calculateTeamBudget(expectedStrength)
     };
     teamIds.push(id);
   }

@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react';
 import type { GameState } from '../game/types';
 
 interface Props {
@@ -6,18 +7,267 @@ interface Props {
 
 export default function FixturesView({ state }: Props) {
   const { league, teams, currentRound } = state;
-  const fixtures = league.schedule.filter(m => m.round === currentRound);
+  const userTeamId = state.userTeamId;
+  
+  // Grouper les matchs par journée
+  const matchesByRound = useMemo(() => {
+    const grouped: Record<number, typeof league.schedule> = {};
+    league.schedule.forEach(match => {
+      if (!grouped[match.round]) {
+        grouped[match.round] = [];
+      }
+      grouped[match.round].push(match);
+    });
+    return grouped;
+  }, [league.schedule]);
+
+  const totalRounds = Math.max(...Object.keys(matchesByRound).map(Number), 38);
+  const [selectedRound, setSelectedRound] = useState<number | 'all'>(currentRound);
+
+  const renderMatch = (m: typeof league.schedule[0]) => {
+    const homeTeam = teams[m.homeTeamId];
+    const awayTeam = teams[m.awayTeamId];
+    const isUserMatch = m.homeTeamId === userTeamId || m.awayTeamId === userTeamId;
+    const isPlayed = m.homeGoals != null && m.awayGoals != null;
+    const homeScorers = m.homeScorers || [];
+    const awayScorers = m.awayScorers || [];
+
+    return (
+      <div
+        key={m.id}
+        className="card"
+        style={{
+          padding: 16,
+          background: isUserMatch ? 'rgba(34, 197, 94, 0.08)' : 'var(--card)',
+          border: isUserMatch ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid var(--border)',
+          opacity: isPlayed ? 0.8 : 1
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: (isPlayed && (homeScorers.length > 0 || awayScorers.length > 0)) ? 8 : 0 }}>
+          {/* Équipe domicile */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+            {homeTeam.logoUrl ? (
+              <img
+                src={homeTeam.logoUrl}
+                alt={homeTeam.shortName}
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: '#0b0f1d',
+                  objectFit: 'contain',
+                  padding: 4
+                }}
+                onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: '#0b0f1d',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--muted)',
+                  fontSize: 12
+                }}
+              >
+                {homeTeam.shortName.slice(0, 2)}
+              </div>
+            )}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{homeTeam.name}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{homeTeam.shortName}</div>
+            </div>
+          </div>
+
+          {/* Score ou VS */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 100, justifyContent: 'center' }}>
+            {isPlayed ? (
+              <>
+                <div style={{ fontWeight: 800, fontSize: 20, minWidth: 30, textAlign: 'center' }}>
+                  {m.homeGoals}
+                </div>
+                <div style={{ color: 'var(--muted)', fontWeight: 700 }}>—</div>
+                <div style={{ fontWeight: 800, fontSize: 20, minWidth: 30, textAlign: 'center' }}>
+                  {m.awayGoals}
+                </div>
+              </>
+            ) : (
+              <div style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 14 }}>VS</div>
+            )}
+          </div>
+
+          {/* Équipe extérieure */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, flexDirection: 'row-reverse' }}>
+            {awayTeam.logoUrl ? (
+              <img
+                src={awayTeam.logoUrl}
+                alt={awayTeam.shortName}
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: '#0b0f1d',
+                  objectFit: 'contain',
+                  padding: 4
+                }}
+                onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: '#0b0f1d',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--muted)',
+                  fontSize: 12
+                }}
+              >
+                {awayTeam.shortName.slice(0, 2)}
+              </div>
+            )}
+            <div style={{ flex: 1, textAlign: 'right' }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{awayTeam.name}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{awayTeam.shortName}</div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Buteurs pour les matchs joués */}
+        {isPlayed && (homeScorers.length > 0 || awayScorers.length > 0) && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: 'var(--muted)', paddingTop: 8, borderTop: '1px solid var(--border)', marginTop: 8 }}>
+            <div style={{ flex: 1 }}>
+              {homeScorers.length > 0 ? (
+                <div>
+                  <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+                </div>
+              ) : (
+                <div className="muted">Aucun but</div>
+              )}
+            </div>
+            <div style={{ flex: 1, textAlign: 'right' }}>
+              {awayScorers.length > 0 ? (
+                <div>
+                  <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                </div>
+              ) : (
+                <div className="muted">Aucun but</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="panel">
-      <h2>Calendrier — Journée {currentRound}</h2>
-      <ul>
-        {fixtures.map(m => (
-          <li key={m.id}>
-            {teams[m.homeTeamId].shortName} vs {teams[m.awayTeamId].shortName}
-            {m.homeGoals != null && m.awayGoals != null ? ` — ${m.homeGoals}:${m.awayGoals}` : ''}
-          </li>
-        ))}
-      </ul>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Calendrier</h2>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select
+            value={selectedRound}
+            onChange={(e) => setSelectedRound(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            style={{
+              padding: '6px 12px',
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              color: 'var(--fg)',
+              fontSize: 14,
+              cursor: 'pointer'
+            }}
+          >
+            <option value="all">Toutes les journées</option>
+            {Array.from({ length: totalRounds }, (_, i) => i + 1).map(round => (
+              <option key={round} value={round}>
+                Journée {round} {round === currentRound ? '(actuelle)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {selectedRound === 'all' ? (
+        <div style={{ display: 'grid', gap: 24 }}>
+          {Array.from({ length: totalRounds }, (_, i) => i + 1).map(round => {
+            const roundMatches = matchesByRound[round] || [];
+            if (roundMatches.length === 0) return null;
+
+            const playedCount = roundMatches.filter(m => m.homeGoals != null && m.awayGoals != null).length;
+            const isCurrentRound = round === currentRound;
+
+            return (
+              <div key={round}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 12,
+                    padding: '8px 12px',
+                    background: isCurrentRound ? 'rgba(34, 197, 94, 0.1)' : 'var(--card)',
+                    border: isCurrentRound ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid var(--border)',
+                    borderRadius: 8
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>
+                    Journée {round} {isCurrentRound && <span style={{ color: 'var(--accent)' }}>(actuelle)</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    {playedCount} / {roundMatches.length} joués
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {roundMatches.map(renderMatch)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div>
+          <div
+            style={{
+              marginBottom: 16,
+              padding: '8px 12px',
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 16 }}>
+              Journée {selectedRound} {selectedRound === currentRound && <span style={{ color: 'var(--accent)' }}>(actuelle)</span>}
+            </div>
+            {(() => {
+              const roundMatches = matchesByRound[selectedRound] || [];
+              const playedCount = roundMatches.filter(m => m.homeGoals != null && m.awayGoals != null).length;
+              return (
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {playedCount} / {roundMatches.length} joués
+                </div>
+              );
+            })()}
+          </div>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(matchesByRound[selectedRound] || []).map(renderMatch)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

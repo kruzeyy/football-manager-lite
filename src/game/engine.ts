@@ -1,4 +1,4 @@
-import type { GameState, Match, Team } from './types';
+import type { GameState, Match, Team, Player } from './types';
 
 function logistic(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -33,6 +33,77 @@ export function simulateMatch(state: GameState, match: Match): { home: number; a
   return { home: homeGoals, away: awayGoals };
 }
 
+function generatePlayerStats(players: Player[], goals: number, isHome: boolean): string[] {
+  // Sélectionner 11 joueurs pour le match (XI type)
+  const selectedPlayers = players
+    .sort((a, b) => b.overall - a.overall)
+    .slice(0, 11);
+
+  // Initialiser les stats si nécessaire
+  selectedPlayers.forEach(p => {
+    if (!p.stats) {
+      p.stats = { matchesPlayed: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0 };
+    }
+    p.stats.matchesPlayed += 1;
+  });
+
+  const scorers: string[] = [];
+
+  // Distribuer les buts (probabilité plus élevée pour les attaquants)
+  let remainingGoals = goals;
+  while (remainingGoals > 0) {
+    const attackers = selectedPlayers.filter(p => p.position === 'FWD');
+    const midfielders = selectedPlayers.filter(p => p.position === 'MID');
+    const defenders = selectedPlayers.filter(p => p.position === 'DEF');
+    
+    const allScorers = [...attackers, ...midfielders, ...defenders];
+    if (allScorers.length === 0) break;
+    
+    // Probabilité : 50% attaquant, 30% milieu, 15% défenseur, 5% gardien
+    let scorer: Player;
+    const rand = Math.random();
+    if (rand < 0.5 && attackers.length > 0) {
+      scorer = attackers[Math.floor(Math.random() * attackers.length)];
+    } else if (rand < 0.8 && midfielders.length > 0) {
+      scorer = midfielders[Math.floor(Math.random() * midfielders.length)];
+    } else if (rand < 0.95 && defenders.length > 0) {
+      scorer = defenders[Math.floor(Math.random() * defenders.length)];
+    } else {
+      scorer = allScorers[Math.floor(Math.random() * allScorers.length)];
+    }
+    
+    scorer.stats!.goals += 1;
+    scorers.push(scorer.name);
+    
+    // Ajouter une passe décisive (probabilité 60%)
+    if (Math.random() < 0.6) {
+      const assisters = selectedPlayers.filter(p => p.id !== scorer.id);
+      if (assisters.length > 0) {
+        const assister = assisters[Math.floor(Math.random() * assisters.length)];
+        assister.stats!.assists += 1;
+      }
+    }
+    
+    remainingGoals--;
+  }
+
+  // Cartons jaunes (probabilité 20% par joueur)
+  selectedPlayers.forEach(p => {
+    if (Math.random() < 0.2) {
+      p.stats!.yellowCards += 1;
+    }
+  });
+
+  // Carton rouge (probabilité 2% par joueur)
+  selectedPlayers.forEach(p => {
+    if (Math.random() < 0.02) {
+      p.stats!.redCards += 1;
+    }
+  });
+
+  return scorers;
+}
+
 export function applyMatchResult(state: GameState, match: Match, homeGoals: number, awayGoals: number): void {
   const home = state.teams[match.homeTeamId];
   const away = state.teams[match.awayTeamId];
@@ -45,4 +116,12 @@ export function applyMatchResult(state: GameState, match: Match, homeGoals: numb
   if (homeGoals > awayGoals) home.points += 3;
   else if (awayGoals > homeGoals) away.points += 3;
   else { home.points += 1; away.points += 1; }
+
+  // Générer les statistiques des joueurs et récupérer les buteurs
+  const homeScorers = generatePlayerStats(home.players, homeGoals, true);
+  const awayScorers = generatePlayerStats(away.players, awayGoals, false);
+  
+  // Stocker les buteurs dans le match
+  match.homeScorers = homeScorers;
+  match.awayScorers = awayScorers;
 }
