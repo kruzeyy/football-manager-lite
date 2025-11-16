@@ -167,7 +167,7 @@ export default function Dashboard({ state }: Props) {
               </div>
               <div className="lineup-col">
                 <div className="muted" style={{ fontWeight: 700, marginBottom: 6 }}>Équipe type {opponent.shortName}</div>
-                <Pitch433 team={opponent} xi={oppXI} reversed />
+                <Pitch433 team={opponent} xi={oppXI} />
               </div>
             </div>
           </div>
