@@ -94,6 +94,7 @@ main { padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr; }
   gap: 16px;
   max-width: 1100px;
   margin: 0 auto;
+  align-items: start; /* évite l'étirement et donc l'espace vide */
 }
 @media (max-width: 900px) {
   .cards { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
@@ -114,7 +115,19 @@ main { padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr; }
 .stat-value { font-weight: 700; }
 .card-title { font-weight: 700; margin-bottom: 8px; }
 
-.card--fixture { padding: 12px; }
+.card--fixture { padding: 12px; position: relative; overflow: hidden; }
+.card--fixture::after {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background: radial-gradient(60% 60% at 10% 0%, rgba(56,189,248,0.06) 0%, transparent 60%),
+              radial-gradient(60% 60% at 90% 100%, rgba(34,197,94,0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+.fixture-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.flex-spacer { flex: 1; }
+.pill--home { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); color: #86efac; }
+.pill--away { background: rgba(56, 189, 248, 0.12); border-color: rgba(56, 189, 248, 0.35); color: #7dd3fc; }
 .card--fixture .fixture-logo { width: 64px; height: 64px; }
 .card--fixture .fixture-name { font-size: 14px; }
 .card--fixture .fixture-vs { font-size: 12px; }
@@ -128,6 +141,7 @@ main { padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr; }
 .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
 
 .next-fixture { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.next-fixture--pretty { padding: 6px 2px 2px; }
 .fixture-side { display: flex; align-items: center; gap: 6px; }
 .fixture-vs { color: var(--muted); font-weight: 700; }
 .fixture-logo {
@@ -141,3 +155,18 @@ main { padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr; }
 }
 .fixture-team { display: flex; flex-direction: column; align-items: center; }
 .fixture-name { font-weight: 700; }
+.fixture-col { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 120px; }
+.fixture-name--lg { font-size: 16px; }
+.fixture-logo--xl { width: 84px; height: 84px; }
+.vs-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  font-weight: 800;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  background: #0e162a;
+}

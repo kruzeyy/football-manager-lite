@@ -47,23 +47,36 @@ export default function Dashboard({ state }: Props) {
         </div>
 
         <div className="card card--fixture">
-          <div className="card-title">Prochain match — Journée {state.currentRound}</div>
-          {next && opponent ? (
-            <div className="next-fixture">
-              <div className="fixture-side">
-                <img className="fixture-logo" src={state.teams[next.homeTeamId].logoUrl || '/vite.svg'} alt="home" onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }} />
-                <div className="fixture-team">
-                  <div className="fixture-name">{state.teams[next.homeTeamId].shortName}</div>
-                  <div className="muted">{next.homeTeamId === user.id ? 'À domicile' : ''}</div>
-                </div>
+          <div className="fixture-header">
+            <div className="pill">Journée {state.currentRound}</div>
+            <div className="flex-spacer" />
+            {next ? (
+              <div className={`pill ${next.homeTeamId === user.id ? 'pill--home' : 'pill--away'}`}>
+                {next.homeTeamId === user.id ? 'À domicile' : 'À l’extérieur'}
               </div>
-              <div className="fixture-vs">VS</div>
-              <div className="fixture-side">
-                <img className="fixture-logo" src={state.teams[next.awayTeamId].logoUrl || '/vite.svg'} alt="away" onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }} />
-                <div className="fixture-team">
-                  <div className="fixture-name">{state.teams[next.awayTeamId].shortName}</div>
-                  <div className="muted">{next.awayTeamId === user.id ? 'À l’extérieur' : ''}</div>
-                </div>
+            ) : null}
+          </div>
+          <div className="card-title">Prochain match</div>
+          {next && opponent ? (
+            <div className="next-fixture next-fixture--pretty">
+              <div className="fixture-col">
+                <img
+                  className="fixture-logo fixture-logo--xl"
+                  src={state.teams[next.homeTeamId].logoUrl || '/vite.svg'}
+                  alt="home"
+                  onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+                />
+                <div className="fixture-name fixture-name--lg">{state.teams[next.homeTeamId].shortName}</div>
+              </div>
+              <div className="vs-badge">VS</div>
+              <div className="fixture-col">
+                <img
+                  className="fixture-logo fixture-logo--xl"
+                  src={state.teams[next.awayTeamId].logoUrl || '/vite.svg'}
+                  alt="away"
+                  onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+                />
+                <div className="fixture-name fixture-name--lg">{state.teams[next.awayTeamId].shortName}</div>
               </div>
             </div>
           ) : (
