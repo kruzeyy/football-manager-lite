@@ -268,6 +268,88 @@ export default function FixturesView({ state }: Props) {
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-title">Coupe de France</div>
+        <div style={{ display: 'grid', gap: 16 }}>
+          {state.cup.stages.map(stage => {
+            const status = stage.completed
+              ? 'Terminé'
+              : stage.matches.some(m => m.homeGoals != null && m.awayGoals != null)
+                ? 'En cours'
+                : 'À venir';
+            return (
+              <div key={stage.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, background: 'var(--card)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700 }}>{stage.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{status}</div>
+                </div>
+                {stage.matches.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 13 }}>Affiches à déterminer</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {stage.matches.map(match => {
+                      const homeTeam = teams[match.homeTeamId];
+                      const awayTeam = teams[match.awayTeamId];
+                      const isPlayed = match.homeGoals != null && match.awayGoals != null;
+                      return (
+                        <div
+                          key={match.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            padding: 10,
+                            borderRadius: 8,
+                            background: 'rgba(15,23,42,0.4)',
+                            border: '1px solid rgba(148,163,184,0.2)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <img
+                              src={homeTeam.logoUrl || '/vite.svg'}
+                              alt={homeTeam.shortName}
+                              onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+                              style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', padding: 2 }}
+                            />
+                            <div style={{ fontWeight: 600 }}>{homeTeam.shortName}</div>
+                          </div>
+                          <div style={{ textAlign: 'center', minWidth: 90 }}>
+                            {isPlayed ? (
+                              <>
+                                <div style={{ fontWeight: 700, fontSize: 16 }}>
+                                  {match.homeGoals} — {match.awayGoals}
+                                </div>
+                                {match.penalties ? (
+                                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                    TAB {match.penalties.home}-{match.penalties.away}
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : (
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>à jouer</div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, flexDirection: 'row-reverse' }}>
+                            <img
+                              src={awayTeam.logoUrl || '/vite.svg'}
+                              alt={awayTeam.shortName}
+                              onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+                              style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', padding: 2 }}
+                            />
+                            <div style={{ fontWeight: 600 }}>{awayTeam.shortName}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

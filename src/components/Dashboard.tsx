@@ -118,6 +118,11 @@ export default function Dashboard({ state }: Props) {
             ) : null}
           </div>
           <div className="card-title">Prochain match</div>
+          {next ? (
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10, color: '#e2e8f0' }}>
+              Championnat&nbsp;: {state.league.name}
+            </div>
+          ) : null}
           {next && opponent ? (
             <div className="next-fixture next-fixture--pretty">
               <div className="fixture-col">
@@ -180,25 +185,83 @@ export default function Dashboard({ state }: Props) {
               <tr>
                 <th>#</th>
                 <th></th>
-                <th>Équipe</th>
+                <th style={{ minWidth: 190 }}></th>
                 <th>Pts</th>
+                <th>V</th>
+                <th>N</th>
+                <th>D</th>
                 <th>DG</th>
               </tr>
             </thead>
             <tbody>
               {table.map((t, i) => (
                 <tr key={t.id} className={t.id === user.id ? 'row-you' : ''}>
-                  <td>{i + 1}</td>
+                  <td className={`rank-cell ${
+                    i < 3
+                      ? 'rank-cell--cl'
+                      : i === 3
+                        ? 'rank-cell--el'
+                        : i === 4
+                          ? 'rank-cell--conf'
+                          : i === 16
+                            ? 'rank-cell--playoff'
+                            : i >= 17
+                              ? 'rank-cell--relegation'
+                              : ''
+                  }`}>
+                    <span className="rank-cell__dot" />
+                    {i + 1}
+                  </td>
                   <td className="mini-logo-cell">
                     <img className="mini-logo" src={t.logoUrl || '/vite.svg'} alt={t.shortName} onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }} />
                   </td>
                   <td className="ellipsis">{t.name}</td>
                   <td>{t.points}</td>
+                  <td>{t.wins ?? 0}</td>
+                  <td>{t.draws ?? 0}</td>
+                  <td>{t.losses ?? 0}</td>
                   <td>{t.goalsFor - t.goalsAgainst}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <div className="slot-legend">
+            <div className="slot-legend-item">
+              <span className="legend-dot legend-dot--cl" />
+              <div>
+                <div>Ligue des Champions</div>
+                <div className="slot-legend-range">Places 1 à 3</div>
+              </div>
+            </div>
+            <div className="slot-legend-item">
+              <span className="legend-dot legend-dot--el" />
+              <div>
+                <div>Europa League</div>
+                <div className="slot-legend-range">Place 4</div>
+              </div>
+            </div>
+            <div className="slot-legend-item">
+              <span className="legend-dot legend-dot--conf" />
+              <div>
+                <div>Europa Conference</div>
+                <div className="slot-legend-range">Place 5</div>
+              </div>
+            </div>
+            <div className="slot-legend-item">
+              <span className="legend-dot legend-dot--playoff" />
+              <div>
+                <div>Barrage Ligue 2</div>
+                <div className="slot-legend-range">Place 17</div>
+              </div>
+            </div>
+            <div className="slot-legend-item">
+              <span className="legend-dot legend-dot--relegation" />
+              <div>
+                <div>Descente Ligue 2</div>
+                <div className="slot-legend-range">Places 18 à 20</div>
+              </div>
+            </div>
+          </div>
         </div>
 
       </div>

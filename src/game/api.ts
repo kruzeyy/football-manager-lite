@@ -1,6 +1,7 @@
 import type { League, Team } from './types';
 import { getTeamBaseOverall } from './data/ratings';
 import { calculateTeamBudget } from './generator';
+import { getDefaultFacilities } from './facilities';
 
 type ApiFootballTeam = {
   team: {
@@ -49,9 +50,14 @@ export async function fetchLeagueFromApiFootball(leagueId: number, season: numbe
       players: [],
       strength: expectedStrength, // Force temporaire basée sur le nom
       points: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
       goalsFor: 0,
       goalsAgainst: 0,
-      funds: calculateTeamBudget(expectedStrength)
+      funds: calculateTeamBudget(expectedStrength),
+      preferredXI: [],
+      facilities: getDefaultFacilities()
     };
     teams[id] = team;
     teamIds.push(id);
@@ -118,9 +124,14 @@ export async function fetchLeagueTeamsFromStandings(leagueId: number, season: nu
       players: [],
       strength: expectedStrength, // Force temporaire basée sur le nom
       points: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
       goalsFor: 0,
       goalsAgainst: 0,
-      funds: calculateTeamBudget(expectedStrength)
+      funds: calculateTeamBudget(expectedStrength),
+      preferredXI: [],
+      facilities: getDefaultFacilities()
     };
     teamIds.push(id);
   }

@@ -1,4 +1,14 @@
 import type { GameState, Match, Team, Player } from './types';
+import { computeFacilityIncome } from './facilities';
+
+type Tactic = 'attacking' | 'balanced' | 'defensive';
+
+interface TeamContext {
+  baseRating: number;
+  tactic: Tactic;
+  attackBias: number;
+  defenseBias: number;
+}
 
 function logistic(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -7,7 +17,7 @@ function logistic(x: number): number {
 function expectedGoals(strengthDiff: number): number {
   const base = 1.2;
   const adj = logistic(strengthDiff / 12) - 0.5; // ~[-0.5, 0.5]
-  return Math.max(0.2, base + adj * 1.2);
+  return Math.max(0.1, base + adj * 1.2);
 }
 
 function sampleGoals(lambda: number): number {
@@ -21,23 +31,110 @@ function sampleGoals(lambda: number): number {
   return goals;
 }
 
+function getRecentFormBonus(state: GameState, teamId: string, sample = 5): number {
+  const matches = state.league.schedule
+    .filter(m => m.homeGoals != null && (m.homeTeamId === teamId || m.awayTeamId === teamId))
+    .sort((a, b) => b.round - a.round)
+    .slice(0, sample);
+
+  let score = 0;
+  matches.forEach(match => {
+    const isHome = match.homeTeamId === teamId;
+    const goalsFor = isHome ? match.homeGoals! : match.awayGoals!;
+    const goalsAgainst = isHome ? match.awayGoals! : match.homeGoals!;
+    if (goalsFor > goalsAgainst) score += 2;
+    else if (goalsFor === goalsAgainst) score += 1;
+    else score -= 2;
+  });
+
+  return score;
+}
+
+function getPreferredXI(team: Team): Player[] {
+  const preferredIds = team.preferredXI ?? [];
+  const playersById: Record<string, Player> = {};
+  team.players.forEach(p => {
+    playersById[p.id] = p;
+  });
+  const selected: Player[] = preferredIds
+    .map(id => playersById[id])
+    .filter((p): p is Player => Boolean(p));
+  if (selected.length < 11) {
+    const remaining = team.players
+      .filter(p => !preferredIds.includes(p.id))
+      .sort((a, b) => b.overall - a.overall);
+    selected.push(...remaining.slice(0, 11 - selected.length));
+  }
+  return selected.slice(0, 11);
+}
+
+function getFatiguePenalty(team: Team): number {
+  const xi = getPreferredXI(team);
+  if (xi.length === 0) return 0;
+  const avgFitness = xi.reduce((sum, p) => sum + (p.fitness ?? 70), 0) / xi.length;
+  return Math.max(0, (75 - avgFitness) / 5); // avg 65 => +2 malus
+}
+
+function buildTeamContext(state: GameState, team: Team): TeamContext {
+  const formBonus = getRecentFormBonus(state, team.id);
+  const fatiguePenalty = getFatiguePenalty(team);
+  const baseRating = team.strength + formBonus - fatiguePenalty;
+  return {
+    baseRating,
+    tactic: 'balanced',
+    attackBias: 0,
+    defenseBias: 0
+  };
+}
+
+function chooseTactic(delta: number): Tactic {
+  if (delta > 3) return 'attacking';
+  if (delta < -3) return 'defensive';
+  return 'balanced';
+}
+
+function tacticBias(tactic: Tactic): { attack: number; defense: number } {
+  switch (tactic) {
+    case 'attacking':
+      return { attack: 0.2, defense: -0.4 };
+    case 'defensive':
+      return { attack: -0.15, defense: 0.5 };
+    default:
+      return { attack: 0, defense: 0 };
+  }
+}
+
 export function simulateMatch(state: GameState, match: Match): { home: number; away: number } {
-  const home: Team = state.teams[match.homeTeamId];
-  const away: Team = state.teams[match.awayTeamId];
-  const homeAdv = 4; // avantage domicile
-  const diff = (home.strength + homeAdv) - away.strength;
-  const homeXg = expectedGoals(diff);
-  const awayXg = expectedGoals(-diff);
+  const home = state.teams[match.homeTeamId];
+  const away = state.teams[match.awayTeamId];
+
+  const homeCtx = buildTeamContext(state, home);
+  const awayCtx = buildTeamContext(state, away);
+
+  const ratingDelta = homeCtx.baseRating - awayCtx.baseRating;
+  homeCtx.tactic = chooseTactic(ratingDelta);
+  awayCtx.tactic = chooseTactic(-ratingDelta);
+
+  const homeBias = tacticBias(homeCtx.tactic);
+  const awayBias = tacticBias(awayCtx.tactic);
+  homeCtx.attackBias = homeBias.attack;
+  homeCtx.defenseBias = homeBias.defense;
+  awayCtx.attackBias = awayBias.attack;
+  awayCtx.defenseBias = awayBias.defense;
+
+  const homeAdv = 3; // avantage domicile légèrement réduit
+  const effectiveDiff = (homeCtx.baseRating + homeCtx.defenseBias + homeAdv) - (awayCtx.baseRating + awayCtx.defenseBias);
+  const homeXg = Math.max(0.1, expectedGoals(effectiveDiff) + homeCtx.attackBias);
+  const awayXg = Math.max(0.1, expectedGoals(-effectiveDiff) + awayCtx.attackBias);
+
   const homeGoals = sampleGoals(homeXg);
   const awayGoals = sampleGoals(awayXg);
   return { home: homeGoals, away: awayGoals };
 }
 
-function generatePlayerStats(players: Player[], goals: number, isHome: boolean): string[] {
+function generatePlayerStats(team: Team, goals: number, isHome: boolean): string[] {
   // Sélectionner 11 joueurs pour le match (XI type)
-  const selectedPlayers = players
-    .sort((a, b) => b.overall - a.overall)
-    .slice(0, 11);
+  const selectedPlayers = getPreferredXI(team);
 
   // Initialiser les stats si nécessaire
   selectedPlayers.forEach(p => {
@@ -113,15 +210,44 @@ export function applyMatchResult(state: GameState, match: Match, homeGoals: numb
   away.goalsFor += awayGoals;
   away.goalsAgainst += homeGoals;
 
-  if (homeGoals > awayGoals) home.points += 3;
-  else if (awayGoals > homeGoals) away.points += 3;
-  else { home.points += 1; away.points += 1; }
+  if (homeGoals > awayGoals) {
+    home.points += 3;
+    home.wins += 1;
+    away.losses += 1;
+  } else if (awayGoals > homeGoals) {
+    away.points += 3;
+    away.wins += 1;
+    home.losses += 1;
+  } else {
+    home.points += 1;
+    away.points += 1;
+    home.draws += 1;
+    away.draws += 1;
+  }
 
   // Générer les statistiques des joueurs et récupérer les buteurs
-  const homeScorers = generatePlayerStats(home.players, homeGoals, true);
-  const awayScorers = generatePlayerStats(away.players, awayGoals, false);
+  const homeScorers = generatePlayerStats(home, homeGoals, true);
+  const awayScorers = generatePlayerStats(away, awayGoals, false);
   
   // Stocker les buteurs dans le match
   match.homeScorers = homeScorers;
   match.awayScorers = awayScorers;
+
+  const homeFacilityBonus = computeFacilityIncome(home, { isHome: true });
+  const awayFacilityBonus = computeFacilityIncome(away, { isHome: false });
+  home.funds += homeFacilityBonus;
+  away.funds += awayFacilityBonus;
+}
+
+export function applyCupMatchResult(state: GameState, match: CupMatch, homeGoals: number, awayGoals: number): void {
+  const home = state.teams[match.homeTeamId];
+  const away = state.teams[match.awayTeamId];
+  const homeScorers = generatePlayerStats(home, homeGoals, true);
+  const awayScorers = generatePlayerStats(away, awayGoals, false);
+  match.homeScorers = homeScorers;
+  match.awayScorers = awayScorers;
+  const homeFacilityBonus = computeFacilityIncome(home, { isHome: true });
+  const awayFacilityBonus = computeFacilityIncome(away, { isHome: false });
+  home.funds += homeFacilityBonus;
+  away.funds += awayFacilityBonus;
 }

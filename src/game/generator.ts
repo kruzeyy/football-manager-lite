@@ -1,5 +1,7 @@
 import type { GameState, League, Player, Team } from './types';
 import { getTeamBaseOverall } from './data/ratings';
+import { getDefaultFacilities } from './facilities';
+import { createInitialCupState } from './cup';
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -132,6 +134,14 @@ export function computeStrength(players: Player[]): number {
   return Math.round(avg);
 }
 
+export function getDefaultPreferredXI(players: Player[]): string[] {
+  return players
+    .slice()
+    .sort((a, b) => b.overall - a.overall)
+    .slice(0, 11)
+    .map(p => p.id);
+}
+
 export function generateLeague(numTeams = 10): { teams: Record<string, Team>; league: League } {
   const teams: Record<string, Team> = {};
   const teamIds: string[] = [];
@@ -146,9 +156,14 @@ export function generateLeague(numTeams = 10): { teams: Record<string, Team>; le
       players,
       strength,
       points: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
       goalsFor: 0,
       goalsAgainst: 0,
-      funds: calculateTeamBudget(strength)
+      funds: calculateTeamBudget(strength),
+      preferredXI: getDefaultPreferredXI(players),
+      facilities: getDefaultFacilities()
     };
     teams[team.id] = team;
     teamIds.push(team.id);
@@ -167,20 +182,41 @@ export function generateLeague(numTeams = 10): { teams: Record<string, Team>; le
 export function createNewGame(): GameState {
   const { teams, league } = generateLeague(12);
   const userTeamId = Object.keys(teams)[0];
+  const cup = createInitialCupState(league.teamIds, userTeamId);
   return {
     userTeamId,
-    teams,
+    teams: injectFacilities(teams),
     league,
-    currentRound: 1
+    currentRound: 1,
+    cup,
+    economy: {}
   };
 }
 
+function injectFacilities(map: Record<string, Team>): Record<string, Team> {
+  const next: Record<string, Team> = {};
+  for (const [id, team] of Object.entries(map)) {
+    if (team.facilities) {
+      next[id] = team;
+      continue;
+    }
+    next[id] = {
+      ...team,
+      facilities: getDefaultFacilities()
+    };
+  }
+  return next;
+}
+
 export function createNewGameFrom(teams: Record<string, Team>, league: League, userTeamId: string): GameState {
+  const cup = createInitialCupState(league.teamIds, userTeamId);
   return {
     userTeamId,
-    teams,
+    teams: injectFacilities(teams),
     league,
-    currentRound: 1
+    currentRound: 1,
+    cup,
+    economy: {}
   };
 }
 
@@ -197,8 +233,13 @@ export function createTeamWithGeneratedSquad(name: string, shortName: string, lo
     players,
     strength,
     points: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
     goalsFor: 0,
     goalsAgainst: 0,
-    funds: calculateTeamBudget(strength)
+    funds: calculateTeamBudget(strength),
+    preferredXI: getDefaultPreferredXI(players),
+    facilities: getDefaultFacilities()
   };
 }
