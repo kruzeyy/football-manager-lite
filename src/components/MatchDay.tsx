@@ -25,6 +25,7 @@ interface LiveMatchContext {
   regulationScore: { home: number; away: number };
   extraGoals?: { home: number; away: number };
   penaltyPlan?: { home: number; away: number } | null;
+  cardPlan: PlannedCard[];
   competition: 'league' | 'cup';
   stageName?: string;
   meta: {
@@ -74,6 +75,14 @@ interface LiveEvent {
   minute: number;
   team: 'home' | 'away';
   text: string;
+}
+
+interface PlannedCard {
+  id: string;
+  minute: number;
+  team: 'home' | 'away';
+  color: 'yellow' | 'red';
+  player: string;
 }
 
 interface RoamOffset {
@@ -170,6 +179,68 @@ function generateGoalMoments(total: number, range: { start: number; end: number 
   return moments.sort((a, b) => a - b);
 }
 
+function weightedSample(weights: number[]): number {
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  const roll = Math.random() * total;
+  let acc = 0;
+  for (let i = 0; i < weights.length; i++) {
+    acc += weights[i];
+    if (roll <= acc) return i;
+  }
+  return weights.length - 1;
+}
+
+function sampleCardCount(color: 'yellow' | 'red'): number {
+  if (color === 'yellow') {
+    const weights = [0.6, 0.26, 0.1, 0.04]; // 0 à 3 jaunes
+    return weightedSample(weights);
+  }
+  const weights = [0.94, 0.05, 0.01]; // 0 à 2 rouges
+  return weightedSample(weights);
+}
+
+function generateCardMoments(total: number, color: 'yellow' | 'red'): number[] {
+  const start = color === 'yellow' ? 8 : 22;
+  const end = color === 'yellow' ? 94 : 92;
+  const spread = Math.max(1, end - start);
+  const moments: number[] = [];
+  for (let i = 0; i < total; i++) {
+    moments.push(Math.floor(start + Math.random() * spread));
+  }
+  return moments.sort((a, b) => a - b);
+}
+
+function pickCardPlayer(team: Team): string {
+  if (!team.players.length) return team.shortName;
+  const choice = team.players[Math.floor(Math.random() * team.players.length)];
+  return choice?.name ?? team.shortName;
+}
+
+function buildCardPlan(team: Team, side: 'home' | 'away'): PlannedCard[] {
+  const plan: PlannedCard[] = [];
+  const yellowCount = sampleCardCount('yellow');
+  const redCount = sampleCardCount('red');
+  generateCardMoments(yellowCount, 'yellow').forEach(minute => {
+    plan.push({
+      id: `${team.id}-y-${minute}-${crypto.randomUUID()}`,
+      minute,
+      team: side,
+      color: 'yellow',
+      player: pickCardPlayer(team)
+    });
+  });
+  generateCardMoments(redCount, 'red').forEach(minute => {
+    plan.push({
+      id: `${team.id}-r-${minute}-${crypto.randomUUID()}`,
+      minute,
+      team: side,
+      color: 'red',
+      player: pickCardPlayer(team)
+    });
+  });
+  return plan;
+}
+
 function pickScorer(team: Team): string {
   const sorted = team.players.slice().sort((a, b) => b.overall - a.overall);
   const pool = sorted.slice(0, Math.max(3, Math.min(sorted.length, 6)));
@@ -185,9 +256,9 @@ function LiveMatchModal({
 }: {
   context: LiveMatchContext;
   onClose: () => void;
-  onComplete: (result: { home: number; away: number; penalties?: { home: number; away: number } }) => void;
+  onComplete: (result: { home: number; away: number; penalties?: { home: number; away: number }; scorers?: { home: string[]; away: string[] } }) => void;
 }) {
-  const { homeTeam, awayTeam, plannedScore, meta, competition, stageName, regulationScore } = context;
+  const { homeTeam, awayTeam, plannedScore, meta, competition, stageName, regulationScore, cardPlan = [] } = context;
   const safeMeta = meta ?? { homeRank: 0, awayRank: 0, homeForm: [], awayForm: [] };
   const stageLabel = stageName;
   const regulationTarget = regulationScore ?? plannedScore;
@@ -283,6 +354,8 @@ function LiveMatchModal({
   const penaltyPlanRef = useRef(context.penaltyPlan ?? null);
   const pendingGoalsRef = useRef<{ home: number; away: number }>({ home: plannedScore.home, away: plannedScore.away });
   const goalPlanRef = useRef(goalPlan.map(plan => ({ ...plan, done: false })));
+  const cardPlanRef = useRef<Array<PlannedCard & { done: boolean }>>([]);
+  const scorersRef = useRef<{ home: string[]; away: string[] }>({ home: [], away: [] });
   const activeGoalRef = useRef<'home' | 'away' | null>(null);
   const goalCooldownRef = useRef(0);
   const minuteRef = useRef(1);
@@ -323,6 +396,8 @@ function LiveMatchModal({
     setIsFinished(false);
     pendingGoalsRef.current = { home: plannedScore.home, away: plannedScore.away };
     goalPlanRef.current = goalPlan.map(plan => ({ ...plan, done: false }));
+    cardPlanRef.current = (cardPlan || []).map(plan => ({ ...plan, done: false }));
+    scorersRef.current = { home: [], away: [] };
     activeGoalRef.current = null;
     goalCooldownRef.current = 0;
     passRef.current = null;
@@ -341,7 +416,7 @@ function LiveMatchModal({
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-  }, [playerSeeds, goalPlan, plannedScore.home, plannedScore.away, context.penaltyPlan]);
+  }, [playerSeeds, goalPlan, cardPlan, plannedScore.home, plannedScore.away, context.penaltyPlan]);
 
   useEffect(() => {
     minuteRef.current = minute;
@@ -381,6 +456,8 @@ function LiveMatchModal({
     pendingGoalsRef.current[team] -= 1;
     const scorer = pickScorer(team === 'home' ? homeTeam : awayTeam);
     const minuteStamp = minuteRef.current;
+    // Stocker le buteur dans le ref
+    scorersRef.current[team].push(scorer);
     showHighlight('goal');
     setEvents(prev => {
       const next = [
@@ -416,6 +493,23 @@ function LiveMatchModal({
     }, 8000);
   }, [homeTeam, awayTeam, showHighlight]);
 
+  const handleCard = useCallback((entry: PlannedCard) => {
+    setEvents(prev => {
+      const emoji = entry.color === 'yellow' ? '🟨' : '🟥';
+      const cardType = entry.color === 'yellow' ? 'Carton jaune' : 'Carton rouge';
+      const next = [
+        ...prev,
+        {
+          id: entry.id,
+          minute: entry.minute,
+          team: entry.team,
+          text: `${emoji} ${cardType} pour ${entry.player}`
+        }
+      ];
+      return next.slice(-8);
+    });
+  }, []);
+
   useEffect(() => {
     if (isFinished) return;
     const nextPlan = goalPlanRef.current.find(plan => !plan.done && minute >= plan.minute);
@@ -424,6 +518,18 @@ function LiveMatchModal({
       handleGoal(nextPlan.team);
     }
   }, [minute, isFinished, handleGoal]);
+
+  useEffect(() => {
+    if (isFinished) return;
+    const cards = cardPlanRef.current;
+    if (!cards || cards.length === 0) return;
+    const currentMinute = minute;
+    const pendingCards = cards.filter(plan => !plan.done && currentMinute >= plan.minute);
+    pendingCards.forEach(card => {
+      handleCard(card);
+      card.done = true;
+    });
+  }, [minute, isFinished, handleCard]);
 
   const advanceSimulation = useCallback((delta: number) => {
     if (isFinished) return;
@@ -902,6 +1008,7 @@ function LiveMatchModal({
     if (isFinished) return;
     pendingGoalsRef.current = { home: 0, away: 0 };
     goalPlanRef.current.forEach(plan => (plan.done = true));
+    cardPlanRef.current.forEach(plan => (plan.done = true));
     activeGoalRef.current = null;
     goalCooldownRef.current = 0;
     setHomeScore(plannedScore.home);
@@ -911,22 +1018,38 @@ function LiveMatchModal({
       away: Math.max(prev.away, plannedScore.away)
     }));
     const generated: LiveEvent[] = [];
+    scorersRef.current = { home: [], away: [] };
     homeGoalMoments.forEach(minuteStamp => {
+      const scorer = pickScorer(homeTeam);
+      scorersRef.current.home.push(scorer);
       generated.push({
         id: crypto.randomUUID(),
         minute: minuteStamp,
         team: 'home',
-        text: `${pickScorer(homeTeam)} marque !`
+        text: `${scorer} marque !`
       });
     });
     awayGoalMoments.forEach(minuteStamp => {
+      const scorer = pickScorer(awayTeam);
+      scorersRef.current.away.push(scorer);
       generated.push({
         id: crypto.randomUUID(),
         minute: minuteStamp,
         team: 'away',
-        text: `${pickScorer(awayTeam)} marque !`
+        text: `${scorer} marque !`
       });
     });
+    cardPlanRef.current.forEach(plan => {
+      const emoji = plan.color === 'yellow' ? '🟨' : '🟥';
+      const cardType = plan.color === 'yellow' ? 'Carton jaune' : 'Carton rouge';
+      generated.push({
+        id: plan.id,
+        minute: plan.minute,
+        team: plan.team,
+        text: `${emoji} ${cardType} pour ${plan.player}`
+      });
+    });
+    generated.sort((a, b) => a.minute - b.minute);
     setEvents(generated.slice(-8));
     const finalMinute = needsExtraTime ? 122 : 96;
     setMinute(finalMinute);
@@ -1227,13 +1350,24 @@ function LiveMatchModal({
                     key={event.id}
                     style={{
                       display: 'flex',
-                      justifyContent: 'space-between',
+                      justifyContent: event.team === 'home' ? 'flex-start' : 'flex-end',
+                      alignItems: 'center',
+                      gap: 8,
                       padding: '4px 0',
                       color: event.team === 'home' ? '#34d399' : '#f87171'
                     }}
                   >
-                    <span>{event.minute}&apos;</span>
-                    <span style={{ textAlign: 'right' }}>{event.text}</span>
+                    {event.team === 'home' ? (
+                      <>
+                        <span style={{ fontWeight: 600 }}>{event.minute}&apos;</span>
+                        <span>{event.text}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>{event.text}</span>
+                        <span style={{ fontWeight: 600 }}>{event.minute}&apos;</span>
+                      </>
+                    )}
                   </div>
                 ))
             )}
@@ -1274,7 +1408,7 @@ function LiveMatchModal({
             </>
           ) : (
             <button
-              onClick={() => onComplete({ home: homeScore, away: awayScore, penalties: penalties ?? undefined })}
+              onClick={() => onComplete({ home: homeScore, away: awayScore, penalties: penalties ?? undefined, scorers: scorersRef.current })}
               style={{
                 flex: 1,
                 padding: '12px 16px',
@@ -1349,6 +1483,10 @@ function ResultsModal({ results, teams, userTeamId, onClose }: { results: MatchR
             const isUserMatch = match.homeTeamId === userTeamId || match.awayTeamId === userTeamId;
             const homeScorers = match.homeScorers || [];
             const awayScorers = match.awayScorers || [];
+            const homeYellowCards = match.homeYellowCards || [];
+            const awayYellowCards = match.awayYellowCards || [];
+            const homeRedCards = match.homeRedCards || [];
+            const awayRedCards = match.awayRedCards || [];
             const isCup = competition === 'cup';
             const stageLabel = isCup
               ? stageName
@@ -1469,27 +1607,67 @@ function ResultsModal({ results, teams, userTeamId, onClose }: { results: MatchR
                   </div>
                 </div>
                 
-                {/* Buteurs */}
-                {(homeScorers.length > 0 || awayScorers.length > 0) && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 11, color: 'var(--muted)', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                    <div style={{ flex: 1 }}>
-                      {homeScorers.length > 0 ? (
-                        <div>
-                          <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+                {/* Buteurs et cartons */}
+                {(homeScorers.length > 0 || awayScorers.length > 0 || homeYellowCards.length > 0 || awayYellowCards.length > 0 || homeRedCards.length > 0 || awayRedCards.length > 0) && (
+                  <div style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                    {(homeScorers.length > 0 || awayScorers.length > 0) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          {homeScorers.length > 0 ? (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+                            </div>
+                          ) : (
+                            <div className="muted">Aucun but</div>
+                          )}
                         </div>
-                      ) : (
-                        <div className="muted">Aucun but</div>
-                      )}
-                    </div>
-                    <div style={{ flex: 1, textAlign: 'right' }}>
-                      {awayScorers.length > 0 ? (
-                        <div>
-                          <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                        <div style={{ flex: 1, textAlign: 'right' }}>
+                          {awayScorers.length > 0 ? (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                            </div>
+                          ) : (
+                            <div className="muted">Aucun but</div>
+                          )}
                         </div>
-                      ) : (
-                        <div className="muted">Aucun but</div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                    {(homeYellowCards.length > 0 || awayYellowCards.length > 0) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 11, color: '#fde047', marginBottom: 4 }}>
+                        <div style={{ flex: 1 }}>
+                          {homeYellowCards.length > 0 && (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>🟨</span> {homeYellowCards.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ flex: 1, textAlign: 'right' }}>
+                          {awayYellowCards.length > 0 && (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>🟨</span> {awayYellowCards.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {(homeRedCards.length > 0 || awayRedCards.length > 0) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 11, color: '#ef4444' }}>
+                        <div style={{ flex: 1 }}>
+                          {homeRedCards.length > 0 && (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>🟥</span> {homeRedCards.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ flex: 1, textAlign: 'right' }}>
+                          {awayRedCards.length > 0 && (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>🟥</span> {awayRedCards.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1765,6 +1943,7 @@ export default function MatchDay({ state, setState }: Props) {
     const awayRank = rankMap[awayTeam.id] ?? 0;
     const homeForm = getTeamForm(state, homeTeam.id);
     const awayForm = getTeamForm(state, awayTeam.id);
+    const cardPlan = [...buildCardPlan(homeTeam, 'home'), ...buildCardPlan(awayTeam, 'away')].sort((a, b) => a.minute - b.minute);
     setLiveMatch({
       match,
       homeTeam,
@@ -1773,6 +1952,7 @@ export default function MatchDay({ state, setState }: Props) {
       regulationScore,
       extraGoals,
       penaltyPlan,
+      cardPlan,
       competition: matchCompetition,
       stageName: options?.stageName,
       meta: {
@@ -1784,10 +1964,39 @@ export default function MatchDay({ state, setState }: Props) {
     });
   };
 
-  const completeLiveMatch = (score: { home: number; away: number; penalties?: { home: number; away: number } }) => {
+  const completeLiveMatch = (score: { home: number; away: number; penalties?: { home: number; away: number }; scorers?: { home: string[]; away: string[] } }) => {
     if (!liveMatch) return;
-    const { match, competition, stageName } = liveMatch;
+    const { match, competition, stageName, cardPlan } = liveMatch;
     const newState: GameState = JSON.parse(JSON.stringify(state));
+    
+    // Extraire les cartons du cardPlan pour les stocker dans le match
+    const homeYellowCards: string[] = [];
+    const awayYellowCards: string[] = [];
+    const homeRedCards: string[] = [];
+    const awayRedCards: string[] = [];
+    
+    if (cardPlan && cardPlan.length > 0) {
+      cardPlan.forEach(card => {
+        if (card.color === 'yellow') {
+          if (card.team === 'home') {
+            homeYellowCards.push(card.player);
+          } else {
+            awayYellowCards.push(card.player);
+          }
+        } else {
+          if (card.team === 'home') {
+            homeRedCards.push(card.player);
+          } else {
+            awayRedCards.push(card.player);
+          }
+        }
+      });
+    }
+    
+    // Utiliser les buteurs passés ou générer des valeurs par défaut
+    const homeScorers = score.scorers?.home || [];
+    const awayScorers = score.scorers?.away || [];
+    
     if (competition === 'league') {
       const target = newState.league.schedule.find(m => m.id === match.id);
       if (!target) return;
@@ -1795,6 +2004,13 @@ export default function MatchDay({ state, setState }: Props) {
       target.awayGoals = score.away;
       target.playedAt = new Date().toISOString();
       applyMatchResult(newState, target, score.home, score.away);
+      // Remplacer les buteurs et cartons générés par ceux du match en direct
+      target.homeScorers = homeScorers;
+      target.awayScorers = awayScorers;
+      target.homeYellowCards = homeYellowCards;
+      target.awayYellowCards = awayYellowCards;
+      target.homeRedCards = homeRedCards;
+      target.awayRedCards = awayRedCards;
       newState.currentRound += 1;
       setState(newState);
       setLiveMatch(null);
@@ -1823,6 +2039,13 @@ export default function MatchDay({ state, setState }: Props) {
         target.penalties = undefined;
       }
       applyCupMatchResult(newState, target, score.home, score.away);
+      // Remplacer les buteurs et cartons générés par ceux du match en direct
+      target.homeScorers = homeScorers;
+      target.awayScorers = awayScorers;
+      target.homeYellowCards = homeYellowCards;
+      target.awayYellowCards = awayYellowCards;
+      target.homeRedCards = homeRedCards;
+      target.awayRedCards = awayRedCards;
       let updatedState = newState;
       const stageCompleted = stage.matches.every(m => m.homeGoals != null && m.awayGoals != null);
       if (stageCompleted) {
@@ -2035,6 +2258,10 @@ export default function MatchDay({ state, setState }: Props) {
               const isPlayed = m.homeGoals != null && m.awayGoals != null;
               const homeScorers = m.homeScorers || [];
               const awayScorers = m.awayScorers || [];
+              const homeYellowCards = m.homeYellowCards || [];
+              const awayYellowCards = m.awayYellowCards || [];
+              const homeRedCards = m.homeRedCards || [];
+              const awayRedCards = m.awayRedCards || [];
                const isCupMatch = cupActive && !!activeCupStage;
                const stageLabel = isCupMatch ? activeCupStage?.name : ('round' in m && m.round ? `Journée ${m.round}` : '');
 
@@ -2151,26 +2378,66 @@ export default function MatchDay({ state, setState }: Props) {
                   </div>
                   
                   {/* Buteurs pour les matchs joués */}
-                  {isPlayed && (homeScorers.length > 0 || awayScorers.length > 0) && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: 'var(--muted)', paddingTop: 8, borderTop: '1px solid var(--border)', marginTop: 8 }}>
-                      <div style={{ flex: 1 }}>
-                        {homeScorers.length > 0 ? (
-                          <div>
-                            <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+                  {isPlayed && (homeScorers.length > 0 || awayScorers.length > 0 || homeYellowCards.length > 0 || awayYellowCards.length > 0 || homeRedCards.length > 0 || awayRedCards.length > 0) && (
+                    <div style={{ paddingTop: 8, borderTop: '1px solid var(--border)', marginTop: 8 }}>
+                      {(homeScorers.length > 0 || awayScorers.length > 0) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                          <div style={{ flex: 1 }}>
+                            {homeScorers.length > 0 ? (
+                              <div>
+                                <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+                              </div>
+                            ) : (
+                              <div className="muted">Aucun but</div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="muted">Aucun but</div>
-                        )}
-                      </div>
-                      <div style={{ flex: 1, textAlign: 'right' }}>
-                        {awayScorers.length > 0 ? (
-                          <div>
-                            <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                          <div style={{ flex: 1, textAlign: 'right' }}>
+                            {awayScorers.length > 0 ? (
+                              <div>
+                                <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                              </div>
+                            ) : (
+                              <div className="muted">Aucun but</div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="muted">Aucun but</div>
-                        )}
-                      </div>
+                        </div>
+                      )}
+                      {(homeYellowCards.length > 0 || awayYellowCards.length > 0) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#fde047', marginBottom: 4 }}>
+                          <div style={{ flex: 1 }}>
+                            {homeYellowCards.length > 0 && (
+                              <div>
+                                <span style={{ fontWeight: 600 }}>🟨</span> {homeYellowCards.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ flex: 1, textAlign: 'right' }}>
+                            {awayYellowCards.length > 0 && (
+                              <div>
+                                <span style={{ fontWeight: 600 }}>🟨</span> {awayYellowCards.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {(homeRedCards.length > 0 || awayRedCards.length > 0) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#ef4444' }}>
+                          <div style={{ flex: 1 }}>
+                            {homeRedCards.length > 0 && (
+                              <div>
+                                <span style={{ fontWeight: 600 }}>🟥</span> {homeRedCards.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ flex: 1, textAlign: 'right' }}>
+                            {awayRedCards.length > 0 && (
+                              <div>
+                                <span style={{ fontWeight: 600 }}>🟥</span> {awayRedCards.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   {stageLabel ? (

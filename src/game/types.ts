@@ -69,6 +69,10 @@ export interface Match {
   playedAt?: string;
   homeScorers?: string[]; // Noms des buteurs de l'équipe à domicile
   awayScorers?: string[]; // Noms des buteurs de l'équipe à l'extérieur
+  homeYellowCards?: string[]; // Noms des joueurs ayant reçu un carton jaune (domicile)
+  awayYellowCards?: string[]; // Noms des joueurs ayant reçu un carton jaune (extérieur)
+  homeRedCards?: string[]; // Noms des joueurs ayant reçu un carton rouge (domicile)
+  awayRedCards?: string[]; // Noms des joueurs ayant reçu un carton rouge (extérieur)
 }
 
 export interface CupMatch {
@@ -80,6 +84,10 @@ export interface CupMatch {
   awayGoals: number | null;
   homeScorers?: string[];
   awayScorers?: string[];
+  homeYellowCards?: string[];
+  awayYellowCards?: string[];
+  homeRedCards?: string[];
+  awayRedCards?: string[];
   decidedBy?: 'REGULATION' | 'PENALTIES';
   penalties?: { home: number; away: number };
   playedAt?: string;

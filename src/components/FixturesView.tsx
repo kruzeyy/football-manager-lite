@@ -31,6 +31,10 @@ export default function FixturesView({ state }: Props) {
     const isPlayed = m.homeGoals != null && m.awayGoals != null;
     const homeScorers = m.homeScorers || [];
     const awayScorers = m.awayScorers || [];
+    const homeYellowCards = m.homeYellowCards || [];
+    const awayYellowCards = m.awayYellowCards || [];
+    const homeRedCards = m.homeRedCards || [];
+    const awayRedCards = m.awayRedCards || [];
 
     return (
       <div
@@ -144,27 +148,67 @@ export default function FixturesView({ state }: Props) {
           </div>
         </div>
         
-        {/* Buteurs pour les matchs joués */}
-        {isPlayed && (homeScorers.length > 0 || awayScorers.length > 0) && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: 'var(--muted)', paddingTop: 8, borderTop: '1px solid var(--border)', marginTop: 8 }}>
-            <div style={{ flex: 1 }}>
-              {homeScorers.length > 0 ? (
-                <div>
-                  <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+        {/* Buteurs et cartons pour les matchs joués */}
+        {isPlayed && (homeScorers.length > 0 || awayScorers.length > 0 || homeYellowCards.length > 0 || awayYellowCards.length > 0 || homeRedCards.length > 0 || awayRedCards.length > 0) && (
+          <div style={{ paddingTop: 8, borderTop: '1px solid var(--border)', marginTop: 8 }}>
+            {(homeScorers.length > 0 || awayScorers.length > 0) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  {homeScorers.length > 0 ? (
+                    <div>
+                      <span style={{ fontWeight: 600 }}>Buts:</span> {homeScorers.join(', ')}
+                    </div>
+                  ) : (
+                    <div className="muted">Aucun but</div>
+                  )}
                 </div>
-              ) : (
-                <div className="muted">Aucun but</div>
-              )}
-            </div>
-            <div style={{ flex: 1, textAlign: 'right' }}>
-              {awayScorers.length > 0 ? (
-                <div>
-                  <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  {awayScorers.length > 0 ? (
+                    <div>
+                      <span style={{ fontWeight: 600 }}>Buts:</span> {awayScorers.join(', ')}
+                    </div>
+                  ) : (
+                    <div className="muted">Aucun but</div>
+                  )}
                 </div>
-              ) : (
-                <div className="muted">Aucun but</div>
-              )}
-            </div>
+              </div>
+            )}
+            {(homeYellowCards.length > 0 || awayYellowCards.length > 0) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#fde047', marginBottom: 4 }}>
+                <div style={{ flex: 1 }}>
+                  {homeYellowCards.length > 0 && (
+                    <div>
+                      <span style={{ fontWeight: 600 }}>🟨</span> {homeYellowCards.join(', ')}
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  {awayYellowCards.length > 0 && (
+                    <div>
+                      <span style={{ fontWeight: 600 }}>🟨</span> {awayYellowCards.join(', ')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {(homeRedCards.length > 0 || awayRedCards.length > 0) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#ef4444' }}>
+                <div style={{ flex: 1 }}>
+                  {homeRedCards.length > 0 && (
+                    <div>
+                      <span style={{ fontWeight: 600 }}>🟥</span> {homeRedCards.join(', ')}
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  {awayRedCards.length > 0 && (
+                    <div>
+                      <span style={{ fontWeight: 600 }}>🟥</span> {awayRedCards.join(', ')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -292,54 +336,95 @@ export default function FixturesView({ state }: Props) {
                       const homeTeam = teams[match.homeTeamId];
                       const awayTeam = teams[match.awayTeamId];
                       const isPlayed = match.homeGoals != null && match.awayGoals != null;
+                      const homeScorers = match.homeScorers || [];
+                      const awayScorers = match.awayScorers || [];
+                      const homeYellowCards = match.homeYellowCards || [];
+                      const awayYellowCards = match.awayYellowCards || [];
+                      const homeRedCards = match.homeRedCards || [];
+                      const awayRedCards = match.awayRedCards || [];
                       return (
                         <div
                           key={match.id}
                           style={{
                             display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                            padding: 10,
+                            flexDirection: 'column',
+                            gap: 10,
+                            padding: 12,
                             borderRadius: 8,
                             background: 'rgba(15,23,42,0.4)',
                             border: '1px solid rgba(148,163,184,0.2)'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                            <img
-                              src={homeTeam.logoUrl || '/vite.svg'}
-                              alt={homeTeam.shortName}
-                              onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
-                              style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', padding: 2 }}
-                            />
-                            <div style={{ fontWeight: 600 }}>{homeTeam.shortName}</div>
-                          </div>
-                          <div style={{ textAlign: 'center', minWidth: 90 }}>
-                            {isPlayed ? (
-                              <>
-                                <div style={{ fontWeight: 700, fontSize: 16 }}>
-                                  {match.homeGoals} — {match.awayGoals}
-                                </div>
-                                {match.penalties ? (
-                                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                                    TAB {match.penalties.home}-{match.penalties.away}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                              <img
+                                src={homeTeam.logoUrl || '/vite.svg'}
+                                alt={homeTeam.shortName}
+                                onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+                                style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', padding: 2 }}
+                              />
+                              <div style={{ fontWeight: 600 }}>{homeTeam.shortName}</div>
+                            </div>
+                            <div style={{ textAlign: 'center', minWidth: 90 }}>
+                              {isPlayed ? (
+                                <>
+                                  <div style={{ fontWeight: 700, fontSize: 16 }}>
+                                    {match.homeGoals} — {match.awayGoals}
                                   </div>
-                                ) : null}
-                              </>
-                            ) : (
-                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>à jouer</div>
-                            )}
+                                  {match.penalties ? (
+                                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                      TAB {match.penalties.home}-{match.penalties.away}
+                                    </div>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <div style={{ fontSize: 12, color: 'var(--muted)' }}>à jouer</div>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, flexDirection: 'row-reverse' }}>
+                              <img
+                                src={awayTeam.logoUrl || '/vite.svg'}
+                                alt={awayTeam.shortName}
+                                onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
+                                style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', padding: 2 }}
+                              />
+                              <div style={{ fontWeight: 600 }}>{awayTeam.shortName}</div>
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, flexDirection: 'row-reverse' }}>
-                            <img
-                              src={awayTeam.logoUrl || '/vite.svg'}
-                              alt={awayTeam.shortName}
-                              onError={(e) => { (e.target as HTMLImageElement).src = '/vite.svg'; }}
-                              style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', padding: 2 }}
-                            />
-                            <div style={{ fontWeight: 600 }}>{awayTeam.shortName}</div>
-                          </div>
+                          {isPlayed && (homeScorers.length > 0 || awayScorers.length > 0 || homeYellowCards.length > 0 || awayYellowCards.length > 0 || homeRedCards.length > 0 || awayRedCards.length > 0) && (
+                            <div style={{ width: '100%', fontSize: 11, color: 'var(--muted)', borderTop: '1px solid rgba(148,163,184,0.2)', paddingTop: 8 }}>
+                              {(homeScorers.length > 0 || awayScorers.length > 0) && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, gap: 12 }}>
+                                  <div style={{ flex: 1 }}>
+                                    {homeScorers.length > 0 ? `Buts: ${homeScorers.join(', ')}` : 'Aucun but'}
+                                  </div>
+                                  <div style={{ flex: 1, textAlign: 'right' }}>
+                                    {awayScorers.length > 0 ? `Buts: ${awayScorers.join(', ')}` : 'Aucun but'}
+                                  </div>
+                                </div>
+                              )}
+                              {(homeYellowCards.length > 0 || awayYellowCards.length > 0) && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#fde047', marginBottom: 4, gap: 12 }}>
+                                  <div style={{ flex: 1 }}>
+                                    {homeYellowCards.length > 0 && <>🟨 {homeYellowCards.join(', ')}</>}
+                                  </div>
+                                  <div style={{ flex: 1, textAlign: 'right' }}>
+                                    {awayYellowCards.length > 0 && <>🟨 {awayYellowCards.join(', ')}</>}
+                                  </div>
+                                </div>
+                              )}
+                              {(homeRedCards.length > 0 || awayRedCards.length > 0) && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ef4444', gap: 12 }}>
+                                  <div style={{ flex: 1 }}>
+                                    {homeRedCards.length > 0 && <>🟥 {homeRedCards.join(', ')}</>}
+                                  </div>
+                                  <div style={{ flex: 1, textAlign: 'right' }}>
+                                    {awayRedCards.length > 0 && <>🟥 {awayRedCards.join(', ')}</>}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

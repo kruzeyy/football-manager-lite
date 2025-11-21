@@ -132,7 +132,11 @@ export function simulateMatch(state: GameState, match: Match): { home: number; a
   return { home: homeGoals, away: awayGoals };
 }
 
-function generatePlayerStats(team: Team, goals: number, isHome: boolean): string[] {
+function generatePlayerStats(team: Team, goals: number, isHome: boolean): {
+  scorers: string[];
+  yellowCards: string[];
+  redCards: string[];
+} {
   // Sélectionner 11 joueurs pour le match (XI type)
   const selectedPlayers = getPreferredXI(team);
 
@@ -145,6 +149,8 @@ function generatePlayerStats(team: Team, goals: number, isHome: boolean): string
   });
 
   const scorers: string[] = [];
+  const yellowCards: string[] = [];
+  const redCards: string[] = [];
 
   // Distribuer les buts (probabilité plus élevée pour les attaquants)
   let remainingGoals = goals;
@@ -184,21 +190,23 @@ function generatePlayerStats(team: Team, goals: number, isHome: boolean): string
     remainingGoals--;
   }
 
-  // Cartons jaunes (probabilité 20% par joueur)
+  // Cartons jaunes (probabilité 8% par joueur)
   selectedPlayers.forEach(p => {
-    if (Math.random() < 0.2) {
+    if (Math.random() < 0.08) {
       p.stats!.yellowCards += 1;
+      yellowCards.push(p.name);
     }
   });
 
-  // Carton rouge (probabilité 2% par joueur)
+  // Carton rouge (probabilité 0,5% par joueur)
   selectedPlayers.forEach(p => {
-    if (Math.random() < 0.02) {
+    if (Math.random() < 0.005) {
       p.stats!.redCards += 1;
+      redCards.push(p.name);
     }
   });
 
-  return scorers;
+  return { scorers, yellowCards, redCards };
 }
 
 export function applyMatchResult(state: GameState, match: Match, homeGoals: number, awayGoals: number): void {
@@ -225,13 +233,17 @@ export function applyMatchResult(state: GameState, match: Match, homeGoals: numb
     away.draws += 1;
   }
 
-  // Générer les statistiques des joueurs et récupérer les buteurs
-  const homeScorers = generatePlayerStats(home, homeGoals, true);
-  const awayScorers = generatePlayerStats(away, awayGoals, false);
+  // Générer les statistiques des joueurs et récupérer les buteurs et cartons
+  const homeStats = generatePlayerStats(home, homeGoals, true);
+  const awayStats = generatePlayerStats(away, awayGoals, false);
   
-  // Stocker les buteurs dans le match
-  match.homeScorers = homeScorers;
-  match.awayScorers = awayScorers;
+  // Stocker les buteurs et cartons dans le match
+  match.homeScorers = homeStats.scorers;
+  match.awayScorers = awayStats.scorers;
+  match.homeYellowCards = homeStats.yellowCards;
+  match.awayYellowCards = awayStats.yellowCards;
+  match.homeRedCards = homeStats.redCards;
+  match.awayRedCards = awayStats.redCards;
 
   const homeFacilityBonus = computeFacilityIncome(home, { isHome: true });
   const awayFacilityBonus = computeFacilityIncome(away, { isHome: false });
@@ -242,10 +254,14 @@ export function applyMatchResult(state: GameState, match: Match, homeGoals: numb
 export function applyCupMatchResult(state: GameState, match: CupMatch, homeGoals: number, awayGoals: number): void {
   const home = state.teams[match.homeTeamId];
   const away = state.teams[match.awayTeamId];
-  const homeScorers = generatePlayerStats(home, homeGoals, true);
-  const awayScorers = generatePlayerStats(away, awayGoals, false);
-  match.homeScorers = homeScorers;
-  match.awayScorers = awayScorers;
+  const homeStats = generatePlayerStats(home, homeGoals, true);
+  const awayStats = generatePlayerStats(away, awayGoals, false);
+  match.homeScorers = homeStats.scorers;
+  match.awayScorers = awayStats.scorers;
+  match.homeYellowCards = homeStats.yellowCards;
+  match.awayYellowCards = awayStats.yellowCards;
+  match.homeRedCards = homeStats.redCards;
+  match.awayRedCards = awayStats.redCards;
   const homeFacilityBonus = computeFacilityIncome(home, { isHome: true });
   const awayFacilityBonus = computeFacilityIncome(away, { isHome: false });
   home.funds += homeFacilityBonus;
