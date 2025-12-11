@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { GameState, Player, Team, Position } from '../game/types';
 import { computeStrength } from '../game/generator';
+import { isSubscriptionActiveSync, FREE_LIMITATIONS } from '../game/subscription';
+import PremiumBanner from './PremiumBanner';
 
 interface Props {
   state: GameState;
@@ -18,6 +20,16 @@ function calculatePlayerPrice(player: Player): number {
 export default function TransfersView({ state, setState }: Props) {
   const userTeam = state.teams[state.userTeamId];
   const otherTeams = Object.values(state.teams).filter(t => t.id !== state.userTeamId);
+  const isSubscribed = isSubscriptionActiveSync();
+  
+  // Compter les transferts de la saison (stocké dans localStorage)
+  const TRANSFERS_COUNT_KEY = `transfers_count_${state.userTeamId}_${state.currentRound}`;
+  const getTransfersCount = (): number => {
+    if (typeof window === 'undefined') return 0;
+    const stored = localStorage.getItem(TRANSFERS_COUNT_KEY);
+    return stored ? parseInt(stored, 10) : 0;
+  };
+  const [transfersCount, setTransfersCount] = useState(getTransfersCount());
 
   // Filtres
   const [positionFilter, setPositionFilter] = useState<Position | 'ALL'>('ALL');
@@ -36,6 +48,12 @@ export default function TransfersView({ state, setState }: Props) {
   }, [userTeam.funds, maxPrice]);
 
   const handleBuyPlayer = (player: Player, fromTeam: Team) => {
+    // Vérifier la limite de transferts pour les utilisateurs non abonnés
+    if (!isSubscribed && transfersCount >= FREE_LIMITATIONS.maxTransfersPerSeason) {
+      alert(`Vous avez atteint la limite de ${FREE_LIMITATIONS.maxTransfersPerSeason} transferts par saison (version gratuite).\n\nAbonnez-vous pour des transferts illimités !`);
+      return;
+    }
+    
     const price = calculatePlayerPrice(player);
     
     if (userTeam.funds < price) {
@@ -85,6 +103,13 @@ export default function TransfersView({ state, setState }: Props) {
     // Recalculer la force de l'équipe (style FIFA)
     updatedUserTeam.strength = computeStrength(updatedUserTeam.players);
 
+    // Incrémenter le compteur de transferts
+    const newCount = transfersCount + 1;
+    setTransfersCount(newCount);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TRANSFERS_COUNT_KEY, String(newCount));
+    }
+
     setState({
       ...state,
       teams: newTeams
@@ -92,6 +117,8 @@ export default function TransfersView({ state, setState }: Props) {
   };
 
   // Filtrer les joueurs selon les critères
+  const remainingTransfers = isSubscribed ? Infinity : Math.max(0, FREE_LIMITATIONS.maxTransfersPerSeason - transfersCount);
+  
   const filteredTeams = useMemo(() => {
     return otherTeams.map(team => {
       const filteredPlayers = team.players.filter(player => {
@@ -136,6 +163,51 @@ export default function TransfersView({ state, setState }: Props) {
   return (
     <div className="panel">
       <h2>Mercato - Transferts</h2>
+      
+      {!isSubscribed && (
+        <>
+          <PremiumBanner 
+            feature="des transferts illimités"
+            onSubscribe={() => {
+              // Trouver le bouton abonnement dans la navigation
+              const buttons = Array.from(document.querySelectorAll('button'));
+              const abonnementBtn = buttons.find(b => b.textContent?.includes('Abonnement'));
+              if (abonnementBtn) {
+                abonnementBtn.click();
+              }
+            }}
+          />
+          <div style={{
+            padding: 12,
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 8,
+            marginBottom: 16
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4, color: '#ef4444' }}>
+              ⚠️ Version gratuite
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+              Transferts restants cette saison: <strong>{remainingTransfers} / {FREE_LIMITATIONS.maxTransfersPerSeason}</strong>
+            </div>
+          </div>
+        </>
+      )}
+      
+      {isSubscribed && (
+        <div style={{
+          padding: 12,
+          background: 'rgba(34, 197, 94, 0.1)',
+          border: '1px solid rgba(34, 197, 94, 0.3)',
+          borderRadius: 8,
+          marginBottom: 16
+        }}>
+          <div style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>
+            ✅ Abonnement actif - Transferts illimités
+          </div>
+        </div>
+      )}
+      
       <div style={{ marginBottom: 16, padding: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8 }}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Trésorerie disponible</div>
         <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--accent)' }}>
@@ -332,14 +404,24 @@ export default function TransfersView({ state, setState }: Props) {
                         <td>
                           <button
                             onClick={() => handleBuyPlayer(player, team)}
-                            disabled={!canAfford || userTeam.players.length >= 30}
+                            disabled={
+                              !canAfford || 
+                              userTeam.players.length >= 30 ||
+                              (!isSubscribed && transfersCount >= FREE_LIMITATIONS.maxTransfersPerSeason)
+                            }
                             style={{
                               padding: '4px 12px',
-                              background: canAfford && userTeam.players.length < 30 ? 'var(--accent)' : 'var(--pill)',
-                              color: canAfford && userTeam.players.length < 30 ? '#0a0a0a' : 'var(--muted)',
+                              background: (canAfford && userTeam.players.length < 30 && (isSubscribed || transfersCount < FREE_LIMITATIONS.maxTransfersPerSeason)) 
+                                ? 'var(--accent)' 
+                                : 'var(--pill)',
+                              color: (canAfford && userTeam.players.length < 30 && (isSubscribed || transfersCount < FREE_LIMITATIONS.maxTransfersPerSeason)) 
+                                ? '#0a0a0a' 
+                                : 'var(--muted)',
                               border: '1px solid var(--border)',
                               borderRadius: 6,
-                              cursor: canAfford && userTeam.players.length < 30 ? 'pointer' : 'not-allowed',
+                              cursor: (canAfford && userTeam.players.length < 30 && (isSubscribed || transfersCount < FREE_LIMITATIONS.maxTransfersPerSeason)) 
+                                ? 'pointer' 
+                                : 'not-allowed',
                               fontSize: 12,
                               fontWeight: 600
                             }}

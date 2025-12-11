@@ -1,7 +1,18 @@
 import type { League, Match } from './types';
 
+// Fonction pour mélanger un tableau (algorithme Fisher-Yates)
+function shuffle<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 export function generateRoundRobinSchedule(league: League): Match[] {
-  const teamIds = [...league.teamIds];
+  // Mélanger l'ordre des équipes pour que le calendrier change à chaque saison
+  const teamIds = shuffle([...league.teamIds]);
   if (teamIds.length % 2 === 1) teamIds.push('BYE');
   const numTeams = teamIds.length;
   const rounds = numTeams - 1;

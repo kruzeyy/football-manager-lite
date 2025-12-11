@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { isSubscriptionActiveSync } from '../game/subscription';
+import PremiumBanner from './PremiumBanner';
 
 interface Props {
   onSelect: (leagueId: number, leagueName: string) => void;
@@ -6,9 +8,19 @@ interface Props {
 
 export default function LeagueSelect({ onSelect }: Props) {
   console.log('[fm-lite] 🎨 LeagueSelect component rendered');
+  const [showLigue1Locked, setShowLigue1Locked] = useState(false);
+  const isSubscribed = isSubscriptionActiveSync();
   
   const handleSelect = (leagueId: number, leagueName: string) => {
     console.log('[fm-lite] 🖱️ LeagueSelect button clicked:', leagueName, leagueId);
+    
+    // Bloquer l'accès à la Ligue 1 si pas abonné
+    if (leagueId === 61 && !isSubscribed) {
+      setShowLigue1Locked(true);
+      setTimeout(() => setShowLigue1Locked(false), 3000);
+      return;
+    }
+    
     console.log('[fm-lite] 🖱️ onSelect function:', typeof onSelect);
     onSelect(leagueId, leagueName);
     console.log('[fm-lite] 🖱️ onSelect called, returning');
@@ -145,40 +157,72 @@ export default function LeagueSelect({ onSelect }: Props) {
           justifyContent: 'center',
           flexWrap: 'wrap'
         }}>
-          <button 
-            className="league-button-1"
-            onClick={() => handleSelect(61, 'Ligue 1')}
-            style={ligue1Style}
-            onMouseEnter={() => setHoveredButton(61)}
-            onMouseLeave={() => setHoveredButton(null)}
-          >
-            <div className="league-icon" style={{ 
-              fontSize: '72px',
-              filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))',
-              lineHeight: 1,
-              transform: hoveredButton === 61 ? 'scale(1.15) rotate(8deg)' : 'scale(1) rotate(0deg)',
-              transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-            }}>
-              🏆
-            </div>
-            <div style={{ 
-              fontSize: '32px', 
-              fontWeight: 'bold',
-              textShadow: '0 2px 4px rgba(0,0,0,0.2)'
-            }}>
-              Ligue 1
-            </div>
-            <div style={{
-              fontSize: '16px',
-              opacity: 0.9,
-              padding: '8px 20px',
-              backgroundColor: 'rgba(255,255,255,0.2)',
-              borderRadius: '20px',
-              backdropFilter: 'blur(10px)'
-            }}>
-              20 équipes
-            </div>
-          </button>
+          <div style={{ position: 'relative', flex: 1 }}>
+            {!isSubscribed && (
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 10,
+                fontSize: '48px',
+                filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.5))'
+              }}>
+                🔒
+              </div>
+            )}
+            <button 
+              className="league-button-1"
+              onClick={() => handleSelect(61, 'Ligue 1')}
+              style={{
+                ...ligue1Style,
+                opacity: !isSubscribed ? 0.6 : 1,
+                cursor: !isSubscribed ? 'not-allowed' : 'pointer',
+                filter: !isSubscribed ? 'grayscale(30%)' : 'none'
+              }}
+              onMouseEnter={() => isSubscribed && setHoveredButton(61)}
+              onMouseLeave={() => setHoveredButton(null)}
+            >
+              <div className="league-icon" style={{ 
+                fontSize: '72px',
+                filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))',
+                lineHeight: 1,
+                transform: hoveredButton === 61 ? 'scale(1.15) rotate(8deg)' : 'scale(1) rotate(0deg)',
+                transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+              }}>
+                🏆
+              </div>
+              <div style={{ 
+                fontSize: '32px', 
+                fontWeight: 'bold',
+                textShadow: '0 2px 4px rgba(0,0,0,0.2)'
+              }}>
+                Ligue 1
+              </div>
+              <div style={{
+                fontSize: '16px',
+                opacity: 0.9,
+                padding: '8px 20px',
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                borderRadius: '20px',
+                backdropFilter: 'blur(10px)'
+              }}>
+                20 équipes
+              </div>
+              {!isSubscribed && (
+                <div style={{
+                  fontSize: '12px',
+                  marginTop: '8px',
+                  padding: '4px 12px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.3)',
+                  borderRadius: '12px',
+                  fontWeight: 600
+                }}>
+                  Premium requis
+                </div>
+              )}
+            </button>
+          </div>
           
           <button 
             className="league-button-2"
@@ -215,6 +259,21 @@ export default function LeagueSelect({ onSelect }: Props) {
             </div>
           </button>
         </div>
+        
+        {showLigue1Locked && (
+          <div style={{
+            marginTop: 24,
+            animation: 'fadeIn 0.3s ease-out'
+          }}>
+            <PremiumBanner 
+              feature="jouer en Ligue 1"
+              onSubscribe={() => {
+                // Scroll vers l'onglet abonnement ou afficher un message
+                alert('Rendez-vous dans l\'onglet "Abonnement" pour activer votre abonnement !');
+              }}
+            />
+          </div>
+        )}
       </div>
     </>
   );

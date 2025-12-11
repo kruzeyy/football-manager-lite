@@ -215,8 +215,10 @@ function injectFacilities(map: Record<string, Team>): Record<string, Team> {
   return next;
 }
 
-export function createNewGameFrom(teams: Record<string, Team>, league: League, userTeamId: string): GameState {
-  const cup = createInitialCupState(league.teamIds, userTeamId);
+export function createNewGameFrom(teams: Record<string, Team>, league: League, userTeamId: string, cupTeamIds?: string[]): GameState {
+  // Utiliser cupTeamIds si fourni (pour inclure les équipes de l'autre ligue), sinon utiliser uniquement les équipes de la ligue
+  const allCupTeamIds = cupTeamIds || league.teamIds;
+  const cup = createInitialCupState(allCupTeamIds, userTeamId);
   return {
     userTeamId,
     teams: injectFacilities(teams),

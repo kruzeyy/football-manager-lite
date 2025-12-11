@@ -5,9 +5,13 @@ import FixturesView from './components/FixturesView';
 import MatchDay from './components/MatchDay';
 import TransfersView from './components/TransfersView';
 import StadiumView from './components/StadiumView';
+import StandingsView from './components/StandingsView';
+import SubscriptionView from './components/SubscriptionView';
+import AuthView from './components/AuthView';
 import type { GameState, SponsorContract, TvDeal } from './game/types';
 import TeamSelect from './components/TeamSelect';
 import LeagueSelect from './components/LeagueSelect';
+import { isAuthenticated, getCurrentUser, logoutUser } from './auth/auth';
 import { createNewGameFrom } from './game/generator';
 import { createInitialCupState } from './game/cup';
 import { fetchLeagueFromApiFootball, fetchLeagueTeamsFromStandings } from './game/api';
@@ -17,7 +21,7 @@ import { loadLeagueCache, saveLeagueCache, clearAllLeagueCache } from './game/ca
 import './index.css';
 import type { League, Team } from './game/types';
 
-type Tab = 'dashboard' | 'squad' | 'fixtures' | 'matchday' | 'transfers' | 'stadium';
+type Tab = 'dashboard' | 'squad' | 'fixtures' | 'matchday' | 'transfers' | 'stadium' | 'standings' | 'subscription';
 
 const SPONSOR_OPTIONS: SponsorContract[] = [
   {
@@ -200,6 +204,7 @@ export default function App() {
   const [selectedLeague, setSelectedLeague] = useState<{ id: number; name: string } | null>(null);
   const [pending, setPending] = useState<{ teams: Record<string, Team>; league: League } | null>(null);
   const [tab, setTab] = useState<Tab>('dashboard');
+  const [isAuth, setIsAuth] = useState<boolean>(() => isAuthenticated());
   
   console.log('[fm-lite] 📊 App render - State values:', {
     hasState: !!state,
@@ -383,11 +388,31 @@ export default function App() {
 
   const randomizeContracts = useCallback(() => {
     const shuffle = <T,>(arr: T[]): T[] => arr.slice().sort(() => Math.random() - 0.5);
-    // Sélectionner entre 4 et 6 sponsors aléatoirement
+    
+    // Fonction pour randomiser un montant avec une variation de ±30%
+    const randomizeAmount = (baseAmount: number): number => {
+      const variation = (Math.random() - 0.5) * 0.6; // Entre -30% et +30%
+      const randomized = baseAmount * (1 + variation);
+      // Arrondir à 0.5M€ près pour plus de réalisme
+      return Math.round(randomized / 500_000) * 500_000;
+    };
+    
+    // Sélectionner entre 4 et 6 sponsors aléatoirement et randomiser leurs montants
     const numSponsors = Math.floor(Math.random() * 3) + 4; // 4, 5 ou 6
     const numTvDeals = Math.floor(Math.random() * 3) + 4; // 4, 5 ou 6
-    const sponsors = shuffle(SPONSOR_OPTIONS).slice(0, numSponsors);
-    const tvDeals = shuffle(TV_OPTIONS).slice(0, numTvDeals);
+    const shuffledSponsors = shuffle(SPONSOR_OPTIONS);
+    const shuffledTvDeals = shuffle(TV_OPTIONS);
+    
+    const sponsors = shuffledSponsors.slice(0, numSponsors).map(sponsor => ({
+      ...sponsor,
+      bonus: randomizeAmount(sponsor.bonus)
+    }));
+    
+    const tvDeals = shuffledTvDeals.slice(0, numTvDeals).map(tv => ({
+      ...tv,
+      payout: randomizeAmount(tv.payout)
+    }));
+    
     setSeasonOptions({ sponsors, tvDeals });
     setSelectedSponsorId(sponsors[0]?.id ?? '');
     setSelectedTvId(tvDeals[0]?.id ?? '');
@@ -449,7 +474,7 @@ export default function App() {
     }
   }, [forcedSeason]);
 
-  const startWithTeam = useCallback((teamId: string) => {
+  const startWithTeam = useCallback(async (teamId: string) => {
     console.log('[fm-lite] 🎯 startWithTeam called with teamId:', teamId);
     console.log('[fm-lite] 🔍 Current pending:', pending);
     
@@ -471,17 +496,49 @@ export default function App() {
     
     randomizeContracts();
     
+    // Récupérer les équipes de l'autre ligue pour la Coupe de France
+    let allCupTeams = { ...pending.teams };
+    let allCupTeamIds = [...pending.league.teamIds];
+    
+    if (selectedLeague) {
+      const currentLeagueId = selectedLeague.id;
+      const otherLeagueId = currentLeagueId === 61 ? 62 : 61; // Ligue 1 = 61, Ligue 2 = 62
+      const otherLeagueName = otherLeagueId === 61 ? 'Ligue 1' : 'Ligue 2';
+      
+      console.log(`[fm-lite] 🏆 Récupération des équipes de ${otherLeagueName} pour la Coupe de France...`);
+      
+      try {
+        const apiKey = (import.meta as any).env?.VITE_API_FOOTBALL_KEY as string | undefined;
+        if (apiKey && apiKey.trim().length > 0) {
+          const { teams: otherTeams, league: otherLeague } = await fetchLeagueFromApiFootball(otherLeagueId, forcedSeason, apiKey);
+          
+          // Fusionner les équipes de l'autre ligue
+          Object.assign(allCupTeams, otherTeams);
+          allCupTeamIds = [...pending.league.teamIds, ...otherLeague.teamIds];
+          
+          console.log(`[fm-lite] ✅ ${otherLeagueName}: ${otherLeague.teamIds.length} équipes ajoutées à la Coupe de France`);
+          console.log(`[fm-lite] 🏆 Total Coupe de France: ${allCupTeamIds.length} équipes (${pending.league.teamIds.length} + ${otherLeague.teamIds.length})`);
+        } else {
+          console.warn('[fm-lite] ⚠️ Pas de clé API, Coupe de France avec équipes de la ligue principale uniquement');
+        }
+      } catch (error) {
+        console.warn(`[fm-lite] ⚠️ Erreur lors de la récupération de ${otherLeagueName}, Coupe de France avec équipes de la ligue principale uniquement:`, error);
+      }
+    }
+    
     // Les joueurs sont déjà générés dans les équipes, pas besoin de les charger depuis l'API
     console.log('[fm-lite] 🔄 Creating game from pending teams...');
     try {
-      const game = createNewGameFrom(pending.teams, { ...pending.league, schedule: [] }, teamId);
+      // Utiliser toutes les équipes (ligue principale + autre ligue pour la coupe) dans le GameState
+      const game = createNewGameFrom(allCupTeams, { ...pending.league, schedule: [] }, teamId, allCupTeamIds);
       console.log('[fm-lite] 🔄 Generating schedule...');
       game.league.schedule = generateRoundRobinSchedule(game.league);
       console.log('[fm-lite] ✅ Game created, setting state...');
       console.log('[fm-lite] 🔍 Game state:', {
         userTeamId: game.userTeamId,
         teamCount: Object.keys(game.teams).length,
-        scheduleLength: game.league.schedule.length
+        scheduleLength: game.league.schedule.length,
+        cupTeamCount: allCupTeamIds.length
       });
       
       setState(game);
@@ -492,14 +549,32 @@ export default function App() {
       console.error('[fm-lite] ❌ Error creating game:', error);
       alert(`Erreur lors de la création de la partie: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
     }
-  }, [pending, randomizeContracts]);
+  }, [pending, randomizeContracts, selectedLeague, forcedSeason]);
 
   const content = useMemo(() => {
     console.log('[fm-lite] 🎨 content useMemo recalculated:', {
       hasState: !!state,
       hasPending: !!pending,
-      selectedLeague: selectedLeague
+      selectedLeague: selectedLeague,
+      tab: tab,
+      isAuth: isAuth
     });
+    
+    // Vérifier l'authentification avant d'accéder au jeu
+    if (!isAuth) {
+      return <AuthView onAuthenticated={() => setIsAuth(true)} />;
+    }
+    
+    // Vérifier l'authentification avant d'accéder au jeu
+    if (!isAuth) {
+      return <AuthView onAuthenticated={() => setIsAuth(true)} />;
+    }
+    
+    // L'onglet Abonnement est toujours accessible, même sans partie en cours
+    if (tab === 'subscription') {
+      // SubscriptionView peut fonctionner sans state (il vérifie isSubscriptionActive)
+      return <SubscriptionView state={state || null} />;
+    }
     
     if (!state) {
       if (pending) {
@@ -563,6 +638,8 @@ export default function App() {
     switch (tab) {
       case 'dashboard':
         return <Dashboard state={state} />;
+      case 'standings':
+        return <StandingsView state={state} />;
       case 'squad':
         return <SquadView state={state} setState={setState} />;
       case 'fixtures':
@@ -573,10 +650,12 @@ export default function App() {
         return <TransfersView state={state} setState={setState} />;
       case 'stadium':
         return <StadiumView state={state} setState={setState} />;
+      case 'subscription':
+        return <SubscriptionView state={state} />;
       default:
         return null;
     }
-  }, [state, tab, pending, selectedLeague, onLeagueSelect, startWithTeam]);
+  }, [state, tab, pending, selectedLeague, onLeagueSelect, startWithTeam, isAuth]);
 
   const needsContracts = state && (!state.economy?.sponsor || !state.economy?.tvDeal);
   const currentSponsor = seasonOptions.sponsors.find(s => s.id === selectedSponsorId);
@@ -630,6 +709,7 @@ export default function App() {
         {state && (
           <>
             <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}>Tableau</button>
+            <button className={tab === 'standings' ? 'active' : ''} onClick={() => setTab('standings')}>Classement</button>
             <button className={tab === 'squad' ? 'active' : ''} onClick={() => setTab('squad')}>Effectif</button>
             <button className={tab === 'fixtures' ? 'active' : ''} onClick={() => setTab('fixtures')}>Calendrier</button>
             <button className={tab === 'matchday' ? 'active' : ''} onClick={() => setTab('matchday')}>Jour de match</button>
@@ -637,7 +717,35 @@ export default function App() {
             <button className={tab === 'transfers' ? 'active' : ''} onClick={() => setTab('transfers')}>Transfert</button>
           </>
         )}
-        <button onClick={reset} style={{ marginLeft: 12 }}>Nouvelle partie</button>
+        <button className={tab === 'subscription' ? 'active' : ''} onClick={() => setTab('subscription')}>Abonnement</button>
+        {isAuth && getCurrentUser() && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 12 }}>
+            <span style={{ fontSize: 14, color: 'var(--muted)' }}>
+              {getCurrentUser()?.name || getCurrentUser()?.email}
+            </span>
+            <button
+              onClick={() => {
+                logoutUser();
+                setIsAuth(false);
+                reset();
+              }}
+              style={{
+                padding: '6px 12px',
+                fontSize: 12,
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+                borderRadius: 6,
+                cursor: 'pointer'
+              }}
+            >
+              Déconnexion
+            </button>
+          </div>
+        )}
+        {state && (
+          <button onClick={reset} style={{ marginLeft: 12 }}>Nouvelle partie</button>
+        )}
       </header>
       <main>{content}</main>
     </div>

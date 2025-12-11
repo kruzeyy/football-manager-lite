@@ -63,7 +63,7 @@ let apiStadiumCache: Map<string, StadiumInfo> | null = null;
  * Charge le cache des stades depuis localStorage
  */
 function loadStadiumCache(): Map<string, StadiumInfo> {
-  if (apiStadiumCache) return apiStadiumCache;
+  if (apiStadiumCache) return apiStadiumCache;  
   
   apiStadiumCache = new Map<string, StadiumInfo>();
   try {

@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import type { CupMatch, GameState, Match, Team } from '../game/types';
 import { simulateMatch, applyMatchResult, applyCupMatchResult } from '../game/engine';
-import { isCupStageUnlocked, prepareCupStage, completeCupStage } from '../game/cup';
+import { isCupStageUnlocked, prepareCupStage, completeCupStage, createInitialCupState } from '../game/cup';
+import { generateRoundRobinSchedule } from '../game/schedule';
 
 interface Props {
   state: GameState;
@@ -43,6 +44,7 @@ interface PlayerDot {
   y: number; // 0-100
   anchorX: number;
   anchorY: number;
+  role: 'GK' | 'DEF' | 'MID' | 'FWD'; // Rôle tactique du joueur
 }
 
 interface BallState {
@@ -121,17 +123,17 @@ const NORMAL_SPEED = 0.6;
 const SPEED_STORAGE_KEY = 'fm-lite-live-speed';
 
 const baseFormation = [
-  { x: 8, y: 50 },
-  { x: 25, y: 15 },
-  { x: 25, y: 35 },
-  { x: 25, y: 65 },
-  { x: 25, y: 85 },
-  { x: 45, y: 25 },
-  { x: 45, y: 50 },
-  { x: 45, y: 75 },
-  { x: 65, y: 30 },
-  { x: 72, y: 50 },
-  { x: 65, y: 70 }
+  { x: 8, y: 50, role: 'GK' as const }, // Gardien
+  { x: 25, y: 15, role: 'DEF' as const }, // Défenseur gauche
+  { x: 25, y: 35, role: 'DEF' as const }, // Défenseur central gauche
+  { x: 25, y: 65, role: 'DEF' as const }, // Défenseur central droit
+  { x: 25, y: 85, role: 'DEF' as const }, // Défenseur droit
+  { x: 45, y: 25, role: 'MID' as const }, // Milieu gauche
+  { x: 45, y: 50, role: 'MID' as const }, // Milieu central
+  { x: 45, y: 75, role: 'MID' as const }, // Milieu droit
+  { x: 65, y: 30, role: 'FWD' as const }, // Attaquant gauche
+  { x: 72, y: 50, role: 'FWD' as const }, // Attaquant central
+  { x: 65, y: 70, role: 'FWD' as const }  // Attaquant droit
 ];
 
 function offsetX(value: number, team: 'home' | 'away'): number {
@@ -146,7 +148,8 @@ function createPlayerDots(homeTeam: Team, awayTeam: Team): PlayerDot[] {
     x: offsetX(pos.x, 'home'),
     y: pos.y,
     anchorX: offsetX(pos.x, 'home'),
-    anchorY: pos.y
+    anchorY: pos.y,
+    role: pos.role
   }));
   const awayDots = baseFormation.map((pos, idx) => ({
     id: `${awayTeam.id}-away-${idx}-${crypto.randomUUID()}`,
@@ -154,7 +157,8 @@ function createPlayerDots(homeTeam: Team, awayTeam: Team): PlayerDot[] {
     x: offsetX(pos.x, 'away'),
     y: pos.y,
     anchorX: offsetX(pos.x, 'away'),
-    anchorY: pos.y
+    anchorY: pos.y,
+    role: pos.role
   }));
   return [...homeDots, ...awayDots];
 }
@@ -258,9 +262,8 @@ function LiveMatchModal({
   onClose: () => void;
   onComplete: (result: { home: number; away: number; penalties?: { home: number; away: number }; scorers?: { home: string[]; away: string[] } }) => void;
 }) {
-  const { homeTeam, awayTeam, plannedScore, meta, competition, stageName, regulationScore, cardPlan = [] } = context;
+  const { homeTeam, awayTeam, plannedScore, meta, competition, regulationScore, cardPlan = [] } = context;
   const safeMeta = meta ?? { homeRank: 0, awayRank: 0, homeForm: [], awayForm: [] };
-  const stageLabel = stageName;
   const regulationTarget = regulationScore ?? plannedScore;
   const extraHomeGoals = Math.max(0, plannedScore.home - regulationTarget.home);
   const extraAwayGoals = Math.max(0, plannedScore.away - regulationTarget.away);
@@ -295,16 +298,6 @@ function LiveMatchModal({
       </div>
     );
   };
-  const describeFormLabel = (form: string[]) => {
-    if (!form.length) return 'Forme inconnue';
-    const wins = form.filter(res => res === 'V').length;
-    const losses = form.filter(res => res === 'D').length;
-    if (wins >= 4) return 'Série impressionnante';
-    if (wins >= 2 && losses <= 1) return 'Forme positive';
-    if (losses >= 3) return 'Forme fragile';
-    return 'Forme mitigée';
-  };
-  const formatFormText = (form: string[]) => (form.length ? form.join(' · ') : '—');
   const clampSpeed = (value: number) => Math.max(MIN_SPEED, Math.min(MAX_SPEED, value));
   const readInitialSpeed = () => {
     if (typeof window === 'undefined') return NORMAL_SPEED;
@@ -339,8 +332,10 @@ function LiveMatchModal({
   const [speed, setSpeed] = useState(readInitialSpeed);
   const [possession, setPossession] = useState({ home: 50, away: 50 });
   const [shots, setShots] = useState({ home: 0, away: 0 });
-  const [highlightVisible, setHighlightVisible] = useState(false);
+  const [highlightVisible, setHighlightVisible] = useState(true); // Afficher le terrain en permanence
   const [highlightType, setHighlightType] = useState<'goal' | 'shot' | null>(null);
+  const [goalDisplayVisible, setGoalDisplayVisible] = useState(false);
+  const [goalDisplayTeam, setGoalDisplayTeam] = useState<'home' | 'away' | null>(null);
 
   const playerPositionsRef = useRef<PlayerDot[]>(playerSeeds);
   const firstHome = playerSeeds.find(p => p.team === 'home');
@@ -409,7 +404,7 @@ function LiveMatchModal({
     possessionAccumulatorRef.current = 0;
     setShots({ home: 0, away: 0 });
     setPossession({ home: 50, away: 50 });
-    setHighlightVisible(false);
+    setHighlightVisible(true); // Garder le terrain visible dès le début
     lastFrameRef.current = null;
     const canvas = canvasRef.current;
     if (canvas) {
@@ -459,6 +454,14 @@ function LiveMatchModal({
     // Stocker le buteur dans le ref
     scorersRef.current[team].push(scorer);
     showHighlight('goal');
+    
+    // Afficher "BUT" en gros
+    setGoalDisplayTeam(team);
+    setGoalDisplayVisible(true);
+    setTimeout(() => {
+      setGoalDisplayVisible(false);
+    }, 3000); // Afficher pendant 3 secondes
+    
     setEvents(prev => {
       const next = [
         ...prev,
@@ -600,22 +603,110 @@ function LiveMatchModal({
 
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+    // Amélioration : IA intelligente basée sur les rôles
     for (const player of players) {
       const isPassTarget = passTargetId === player.id;
       const attacksRight = player.anchorX < 50;
       const hasBall = possessionTeam === player.team;
+      const ballOwner = ownerFromSnapshot;
       const roam = ensureRoam(player, hasBall);
-      const fromCenterX = player.anchorX - center.x;
-      const fromCenterY = player.anchorY - center.y;
-      const radialPushX = fromCenterX * 0.25;
-      const radialPushY = fromCenterY * 0.25;
+      
+      // Comportement spécifique selon le rôle
+      let roleAnchorX = player.anchorX;
+      let roleAnchorY = player.anchorY;
+      let roleMobility = 1.0;
+      let defensiveUrgency = 0;
+      
+      if (player.role === 'GK') {
+        // Gardien : reste strictement devant son but
+        const goalX = attacksRight ? 8 : 92;
+        roleAnchorX = goalX;
+        roleAnchorY = 50;
+        roleMobility = 0.15; // Très peu mobile
+        // Le gardien suit le ballon sur l'axe Y uniquement
+        if (ballSnapshot.y > 30 && ballSnapshot.y < 70) {
+          roleAnchorY = ballSnapshot.y;
+        }
+        // Force le gardien à rester dans une zone très limitée (2-3 unités autour du but)
+        // Pas de mouvement significatif sur l'axe X
+      } else if (player.role === 'DEF') {
+        // Défenseurs : maintiennent la ligne défensive
+        roleAnchorX = player.anchorX;
+        roleMobility = 0.5;
+        // Si l'équipe adverse a le ballon, les défenseurs se replient
+        if (!hasBall && ballOwner && ballOwner.team !== player.team) {
+          const ballDistance = Math.abs(ballSnapshot.x - player.anchorX);
+          if (ballDistance < 30) {
+            defensiveUrgency = 0.8;
+            // Repli défensif
+            const retreatX = attacksRight ? Math.max(15, player.anchorX - 5) : Math.min(85, player.anchorX + 5);
+            roleAnchorX = retreatX;
+          }
+        }
+        // Marquage : suivre le joueur adverse le plus proche
+        const opponents = players.filter(p => p.team !== player.team && p.role !== 'GK');
+        if (opponents.length > 0) {
+          const nearestOpponent = opponents.reduce((closest, opp) => {
+            const distClosest = Math.hypot(closest.x - player.x, closest.y - player.y);
+            const distOpp = Math.hypot(opp.x - player.x, opp.y - player.y);
+            return distOpp < distClosest ? opp : closest;
+          });
+          const markDistance = Math.hypot(nearestOpponent.x - player.x, nearestOpponent.y - player.y);
+          if (markDistance < 25 && Math.abs(nearestOpponent.x - player.x) < 20) {
+            roleAnchorY += (nearestOpponent.y - player.y) * 0.3;
+          }
+        }
+      } else if (player.role === 'MID') {
+        // Milieux : équilibrent entre attaque et défense
+        roleMobility = 0.8;
+        if (hasBall) {
+          // Support offensif : avance
+          roleAnchorX += attacksRight ? 8 : -8;
+        } else if (!hasBall && ballOwner && ballOwner.team === player.team) {
+          // Support du porteur : se positionne pour une passe
+          const ballDist = Math.hypot(ballSnapshot.x - player.x, ballSnapshot.y - player.y);
+          if (ballDist < 40 && ballDist > 15) {
+            // Position optimale pour recevoir une passe
+            const angleToGoal = Math.atan2(50 - player.y, (attacksRight ? 100 : 0) - player.x);
+            roleAnchorX += Math.cos(angleToGoal) * 5;
+            roleAnchorY += Math.sin(angleToGoal) * 3;
+          }
+        } else {
+          // Pression défensive
+          const ballDist = Math.hypot(ballSnapshot.x - player.x, ballSnapshot.y - player.y);
+          if (ballDist < 35) {
+            defensiveUrgency = 0.6;
+            roleAnchorX += (ballSnapshot.x - player.x) * 0.4;
+            roleAnchorY += (ballSnapshot.y - player.y) * 0.3;
+          }
+        }
+      } else if (player.role === 'FWD') {
+        // Attaquants : cherchent les espaces offensifs
+        roleMobility = 0.9;
+        if (hasBall) {
+          // Avance vers le but
+          roleAnchorX += attacksRight ? 12 : -12;
+        } else if (!hasBall && ballOwner && ballOwner.team === player.team) {
+          // Trouve un espace pour une passe (utiliser players pour l'instant, sera mis à jour après)
+          const spaceScore = findBestSpace(player, players, attacksRight);
+          roleAnchorX += spaceScore.x;
+          roleAnchorY += spaceScore.y;
+        } else {
+          // Appui défensif limité
+          roleMobility = 0.6;
+        }
+      }
+      
+      const radialPushX = (roleAnchorX - center.x) * 0.25;
+      const radialPushY = (roleAnchorY - center.y) * 0.25;
       const widthStretch = hasBall ? (attacksRight ? 10 : -10) : radialPushX * 0.15;
-      const desiredAnchorX = clamp(player.anchorX + roam.offsetX + widthStretch + radialPushX, 4, 96);
-      const flankPull = player.anchorY < 40 ? -10 : player.anchorY > 60 ? 10 : 0;
-      const desiredAnchorY = clamp(player.anchorY + roam.offsetY + flankPull + radialPushY, 6, 94);
-      const baseJitter = hasBall ? 1.15 : 0.85;
-      const anchorStrength = hasBall ? 0.32 : 0.7;
-      const anchorBiasX = (desiredAnchorX - player.x) * anchorStrength * 0.085;
+      const desiredAnchorX = clamp(roleAnchorX + roam.offsetX + widthStretch + radialPushX, 4, 96);
+      const flankPull = roleAnchorY < 40 ? -10 : roleAnchorY > 60 ? 10 : 0;
+      const desiredAnchorY = clamp(roleAnchorY + roam.offsetY + flankPull + radialPushY, 6, 94);
+      
+      const baseJitter = hasBall ? 1.15 : (0.85 + defensiveUrgency * 0.3);
+      const anchorStrength = hasBall ? 0.32 : (0.7 + defensiveUrgency * 0.2);
+      const anchorBiasX = (desiredAnchorX - player.x) * anchorStrength * 0.085 * roleMobility;
       let roleBiasX = 0;
       if (hasBall) {
         roleBiasX += (ballFocus.x - player.x) * 0.018;
@@ -628,12 +719,22 @@ function LiveMatchModal({
       }
       if (push === 'home' && player.team === 'home') roleBiasX += 0.8;
       if (push === 'away' && player.team === 'away') roleBiasX -= 0.8;
-      let nextX = player.x + ((Math.random() - 0.5) * baseJitter * 2 + anchorBiasX + roleBiasX) * delta;
-      if (nextX < 10) nextX += (10 - nextX) * 0.25;
-      if (nextX > 90) nextX -= (nextX - 90) * 0.25;
 
-      const anchorBiasY = (desiredAnchorY - player.y) * anchorStrength * 0.085;
+      const anchorBiasY = (desiredAnchorY - player.y) * anchorStrength * 0.085 * roleMobility;
       let roleBiasY = 0;
+      
+      // Évitement des adversaires
+      const opponentsNearby = players.filter(p => p.team !== player.team && p.id !== player.id);
+      for (const opp of opponentsNearby) {
+        const dist = Math.hypot(opp.x - player.x, opp.y - player.y);
+        if (dist < 12) {
+          const avoidAngle = Math.atan2(player.y - opp.y, player.x - opp.x);
+          roleBiasX += Math.cos(avoidAngle) * (12 - dist) * 0.15;
+          roleBiasY += Math.sin(avoidAngle) * (12 - dist) * 0.15;
+        }
+      }
+      
+      // Calcul des biais Y pour tous les joueurs
       if (hasBall) {
         roleBiasY += (ballFocus.y - player.y) * 0.018;
       } else {
@@ -642,10 +743,88 @@ function LiveMatchModal({
       if (isPassTarget && currentPass) {
         roleBiasY += (currentPass.start.y - player.y) * -0.015;
       }
+      
+      // Mouvement des joueurs (delta contient déjà le multiplicateur de vitesse)
+      let nextX = player.x + ((Math.random() - 0.5) * baseJitter * 2 + anchorBiasX + roleBiasX) * delta;
       let nextY = player.y + ((Math.random() - 0.5) * baseJitter * 1.5 + anchorBiasY + roleBiasY) * delta;
+      
+      // Contraintes spéciales pour le gardien : doit rester strictement devant son but
+      if (player.role === 'GK') {
+        const goalX = attacksRight ? 8 : 92;
+        
+        // Contrainte sur l'axe X : gardien doit rester très près du but (max 3 unités d'écart)
+        if (attacksRight) {
+          // Gardien à gauche : doit rester entre x=5 et x=11
+          nextX = Math.max(5, Math.min(11, nextX));
+          // Force un retour vers le but si trop éloigné
+          if (Math.abs(nextX - goalX) > 2) {
+            nextX = goalX + (nextX > goalX ? 2 : -2);
+          }
+        } else {
+          // Gardien à droite : doit rester entre x=89 et x=95
+          nextX = Math.max(89, Math.min(95, nextX));
+          // Force un retour vers le but si trop éloigné
+          if (Math.abs(nextX - goalX) > 2) {
+            nextX = goalX + (nextX > goalX ? 2 : -2);
+          }
+        }
+        
+        // Contrainte sur l'axe Y : gardien reste dans la zone du but (35-65)
+        nextY = Math.max(35, Math.min(65, nextY));
+      } else {
+        // Autres joueurs : contraintes normales
+        if (nextX < 10) nextX += (10 - nextX) * 0.25;
+        if (nextX > 90) nextX -= (nextX - 90) * 0.25;
+      }
 
       player.x = Math.max(4, Math.min(96, nextX));
       player.y = Math.max(6, Math.min(94, nextY));
+      
+      // Force finale pour le gardien : s'assurer qu'il reste près du but (sécurité supplémentaire)
+      if (player.role === 'GK') {
+        const goalX = attacksRight ? 8 : 92;
+        // Si le gardien s'est trop éloigné, le ramener immédiatement
+        if (Math.abs(player.x - goalX) > 3) {
+          player.x = goalX + (player.x > goalX ? 3 : -3);
+        }
+        // Limiter la position Y à la zone du but
+        player.y = Math.max(35, Math.min(65, player.y));
+      }
+    }
+    
+    // Fonction helper pour trouver le meilleur espace (attaquants)
+    function findBestSpace(player: PlayerDot, allPlayers: PlayerDot[], attacksRight: boolean): { x: number; y: number } {
+      let bestSpace = { x: 0, y: 0 };
+      let bestScore = -Infinity;
+      const gridPoints = 8;
+      for (let i = 0; i < gridPoints; i++) {
+        const angle = (i / gridPoints) * Math.PI * 2;
+        const testX = player.x + Math.cos(angle) * 20;
+        const testY = player.y + Math.sin(angle) * 20;
+        if (testX < 4 || testX > 96 || testY < 6 || testY > 94) continue;
+        
+        // Score basé sur : distance aux adversaires, progression vers le but, distance au ballon
+        let score = 0;
+        const forwardProgress = attacksRight ? (testX - player.x) : (player.x - testX);
+        score += forwardProgress * 2;
+        
+        const opponents = allPlayers.filter(p => p.team !== player.team);
+        let minOppDist = Infinity;
+        for (const opp of opponents) {
+          const dist = Math.hypot(opp.x - testX, opp.y - testY);
+          minOppDist = Math.min(minOppDist, dist);
+        }
+        score += minOppDist * 0.3;
+        
+        const ballDist = Math.hypot(ballSnapshot.x - testX, ballSnapshot.y - testY);
+        if (ballDist > 15 && ballDist < 40) score += 5;
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestSpace = { x: testX - player.x, y: testY - player.y };
+        }
+      }
+      return bestSpace;
     }
     playerPositionsRef.current = players;
 
@@ -685,25 +864,226 @@ function LiveMatchModal({
       }
     }
 
+    // Analyse de la situation du match pour l'IA
+    const analyzeMatchSituation = (team: 'home' | 'away') => {
+      // Récupérer les scores depuis les refs ou l'état
+      const currentHomeScore = homeScore;
+      const currentAwayScore = awayScore;
+      const teamScore = team === 'home' ? currentHomeScore : currentAwayScore;
+      const opponentScore = team === 'home' ? currentAwayScore : currentHomeScore;
+      const scoreDiff = teamScore - opponentScore;
+      const timeLeft = 90 - minuteRef.current;
+      const isWinning = scoreDiff > 0;
+      const isLosing = scoreDiff < 0;
+      const isDrawing = scoreDiff === 0;
+      
+      // Stratégie selon la situation
+      let strategy: 'defensive' | 'balanced' | 'aggressive' = 'balanced';
+      let urgency = 0.5; // 0 = très calme, 1 = très pressé
+      
+      if (isLosing && timeLeft < 30) {
+        strategy = 'aggressive'; // On attaque si on perd en fin de match
+        urgency = 0.9;
+      } else if (isWinning && timeLeft < 20) {
+        strategy = 'defensive'; // On défend si on mène en fin de match
+        urgency = 0.3;
+      } else if (isLosing) {
+        strategy = 'aggressive';
+        urgency = 0.7;
+      } else if (isWinning && scoreDiff >= 2) {
+        strategy = 'defensive';
+        urgency = 0.4;
+      } else if (isDrawing && timeLeft < 15) {
+        strategy = 'aggressive'; // On cherche le but en fin de match à égalité
+        urgency = 0.8;
+      }
+      
+      return { strategy, urgency, scoreDiff, isWinning, isLosing };
+    };
+
     const pickPassTarget = (origin: PlayerDot) => {
       const teammates = updatedPlayers.filter(p => p.team === origin.team && p.id !== origin.id);
       if (teammates.length === 0) return null;
       const forwardPref = origin.anchorX < 50 ? 1 : -1;
       const lastCarrier = lastCarrierRef.current;
+      const opponents = updatedPlayers.filter(p => p.team !== origin.team);
+      
+      // Analyse de la situation du match
+      const situation = analyzeMatchSituation(origin.team);
+      
+      // IA avancée : analyse intelligente et contextuelle des passes
       const sorted = teammates
         .map(player => {
           const dx = player.x - origin.x;
-          const dy = Math.abs(player.y - origin.y);
+          const dy = player.y - origin.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
-          const forwardScore = forwardPref * dx;
-          let score = forwardScore - distance * 0.35 - dy * 0.12;
-          if (player.id === lastCarrier) {
-            score -= 8; // éviter les passes rapides en aller-retour
+          
+          // Score basique : progression vers l'avant
+          let score = forwardPref * dx * 1.5;
+          
+          // ADAPTATION STRATÉGIQUE selon la situation
+          if (situation.strategy === 'aggressive') {
+            // Mode agressif : privilégier les passes vers l'avant et les attaquants
+            score += forwardPref * dx * 0.8; // Bonus progression offensive
+            if (player.role === 'FWD') score += 15; // Fort bonus attaquants
+            if (player.role === 'MID' && forwardPref * dx > 10) score += 8; // Milieux offensifs
+          } else if (situation.strategy === 'defensive') {
+            // Mode défensif : passes sécurisées, garder la possession
+            score += -forwardPref * dx * 0.3; // Privilégier passes vers l'arrière
+            if (player.role === 'DEF' || player.role === 'MID') score += 5; // Privilégier défenseurs/milieux
+            score -= distance * 0.6; // Passes plus courtes
           }
-          return { player, score };
+          
+          // Pénalité pour la distance (passes courtes plus fiables)
+          score -= distance * 0.4;
+          score -= Math.abs(dy) * 0.15;
+          
+          // Bonus pour les passes vers les attaquants (selon stratégie)
+          if (player.role === 'FWD') {
+            score += situation.strategy === 'aggressive' ? 15 : 8;
+          } else if (player.role === 'MID') {
+            score += situation.strategy === 'aggressive' ? 5 : 3;
+          }
+          
+          // Analyse avancée des angles et interceptions
+          let interceptRisk = 0;
+          let closestIntercepter = Infinity;
+          for (const opp of opponents) {
+            const oppDistToLine = pointToLineDistance(
+              opp.x, opp.y,
+              origin.x, origin.y,
+              player.x, player.y
+            );
+            const oppDistToOrigin = Math.hypot(opp.x - origin.x, opp.y - origin.y);
+            const oppDistToTarget = Math.hypot(opp.x - player.x, opp.y - player.y);
+            const passLineDist = Math.hypot(player.x - origin.x, player.y - origin.y);
+            
+            // Calcul du risque d'interception
+            if (oppDistToLine < 4) {
+              // Adversaire proche de la ligne de passe
+              const isBetween = oppDistToOrigin < passLineDist && oppDistToTarget < passLineDist;
+              if (isBetween) {
+                const risk = (4 - oppDistToLine) * 5; // Plus proche = plus risqué
+                interceptRisk += risk;
+                closestIntercepter = Math.min(closestIntercepter, oppDistToLine);
+              }
+            }
+            
+            // Pénalité si adversaire très proche du receveur
+            if (oppDistToTarget < 10) {
+              interceptRisk += (10 - oppDistToTarget) * 1.5;
+            }
+            
+            // Pénalité si adversaire presse le porteur
+            if (oppDistToOrigin < 12) {
+              interceptRisk += 3;
+            }
+          }
+          score -= interceptRisk;
+          
+          // Bonus pour passes vers espaces libres (analyse de zones)
+          let spaceQuality = 0;
+          let closestOpponent = Infinity;
+          for (const opp of opponents) {
+            const dist = Math.hypot(opp.x - player.x, opp.y - player.y);
+            closestOpponent = Math.min(closestOpponent, dist);
+          }
+          // Plus l'espace est grand, meilleur c'est
+          if (closestOpponent > 20) spaceQuality += 10;
+          else if (closestOpponent > 15) spaceQuality += 6;
+          else if (closestOpponent > 10) spaceQuality += 2;
+          score += spaceQuality;
+          
+          // Analyse de la qualité de la position du receveur
+          const attacksRight = origin.anchorX < 50;
+          const receiverInBox = attacksRight ? player.x > 85 : player.x < 15;
+          const receiverInDangerZone = attacksRight ? player.x > 75 : player.x < 25;
+          
+          if (receiverInBox && player.role === 'FWD') {
+            score += 20; // Très bon bonus si attaquant dans la surface
+          } else if (receiverInDangerZone && player.role === 'FWD') {
+            score += 12; // Bon bonus si attaquant proche de la surface
+          }
+          
+          // Prise en compte de la ligne de passe (passes en profondeur)
+          if (forwardPref * dx > 15 && Math.abs(dy) < 20) {
+            score += 8; // Bonus pour passes en profondeur
+          }
+          
+          // Éviter les passes rapides en aller-retour
+          if (player.id === lastCarrier) {
+            score -= 15; // Pénalité plus forte
+          }
+          
+          // Coéquipiers qui se déplacent vers un bon espace (support)
+          const teammatesSupporting = teammates.filter(t => {
+            const tDist = Math.hypot(t.x - player.x, t.y - player.y);
+            return tDist < 25 && t.id !== player.id;
+          });
+          if (teammatesSupporting.length > 0) {
+            score += 3; // Bonus si d'autres coéquipiers peuvent aider
+          }
+          
+          // Pénalité pour passes trop risquées si on mène
+          if (situation.isWinning && interceptRisk > 10) {
+            score -= 5;
+          }
+          
+          return { player, score, interceptRisk, spaceQuality };
         })
         .sort((a, b) => b.score - a.score);
-      return sorted[0]?.player ?? teammates[0];
+      
+      // Sélection intelligente avec variabilité réaliste
+      const topOptions = sorted.slice(0, 4); // Top 4 options
+      if (topOptions.length === 0) return teammates[0];
+      
+      // Si stratégie agressive et option très risquée mais prometteuse
+      if (situation.strategy === 'aggressive' && topOptions.length > 1) {
+        const riskyButGood = topOptions.find(opt => opt.interceptRisk > 8 && opt.spaceQuality > 8);
+        if (riskyButGood && Math.random() < 0.4) {
+          return riskyButGood.player; // 40% de chance de prendre le risque
+        }
+      }
+      
+      // Sélection pondérée : meilleure option 70%, 2e option 20%, 3e option 10%
+      const rand = Math.random();
+      if (rand < 0.7 || topOptions.length === 1) {
+        return topOptions[0].player;
+      } else if (rand < 0.9 && topOptions.length >= 2) {
+        return topOptions[1].player;
+      } else if (topOptions.length >= 3) {
+        return topOptions[2].player;
+      }
+      
+      return topOptions[0].player;
+    };
+    
+    // Fonction helper : distance d'un point à une ligne
+    const pointToLineDistance = (px: number, py: number, x1: number, y1: number, x2: number, y2: number): number => {
+      const A = px - x1;
+      const B = py - y1;
+      const C = x2 - x1;
+      const D = y2 - y1;
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      let param = -1;
+      if (lenSq !== 0) param = dot / lenSq;
+      
+      let xx: number, yy: number;
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      } else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      } else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+      
+      const dx = px - xx;
+      const dy = py - yy;
+      return Math.sqrt(dx * dx + dy * dy);
     };
 
     const startPass = (origin: PlayerDot, target: PlayerDot) => {
@@ -732,10 +1112,92 @@ function LiveMatchModal({
       ball.ownerId = null;
     };
 
+    // Fonction IA pour évaluer si on doit tirer
+    const shouldShoot = (shooter: PlayerDot) => {
+      const situation = analyzeMatchSituation(shooter.team);
+      const attacksRight = shooter.anchorX < 50;
+      const goalX = attacksRight ? 100 : 0;
+      const goalY = 50;
+      
+      // Distance au but
+      const distToGoal = Math.hypot(shooter.x - goalX, shooter.y - goalY);
+      
+      // Angle de tir (plus petit = mieux)
+      const angleToGoal = Math.abs(Math.atan2(shooter.y - goalY, Math.abs(shooter.x - goalX)));
+      const angleQuality = 1 - (angleToGoal / Math.PI); // 0-1, plus proche de 0° = mieux
+      
+      // Pression défensive
+      const opponents = updatedPlayers.filter(p => p.team !== shooter.team);
+      const defendersInWay = opponents.filter(opp => {
+        const oppToGoal = Math.hypot(opp.x - goalX, opp.y - goalY);
+        return oppToGoal < distToGoal && Math.hypot(opp.x - shooter.x, opp.y - shooter.y) < 25;
+      }).length;
+      
+      // Score de qualité du tir
+      let shootScore = 0;
+      
+      // Position dans la surface = très bon
+      if (attacksRight ? shooter.x > 85 : shooter.x < 15) {
+        shootScore += 40;
+        if (shooter.role === 'FWD') shootScore += 15;
+      }
+      // Position proche de la surface
+      else if (attacksRight ? shooter.x > 75 : shooter.x < 25) {
+        shootScore += 25;
+        if (shooter.role === 'FWD') shootScore += 10;
+      }
+      // Position moyenne
+      else if (attacksRight ? shooter.x > 65 : shooter.x < 35) {
+        shootScore += 10;
+      }
+      
+      // Angle de tir
+      shootScore += angleQuality * 15;
+      
+      // Distance
+      shootScore += (50 - Math.min(distToGoal, 50)) * 0.4;
+      
+      // Pénalité pour défenseurs
+      shootScore -= defendersInWay * 8;
+      
+      // Adaptation selon stratégie
+      if (situation.strategy === 'aggressive') {
+        shootScore += 10; // Plus de tirs en mode agressif
+        if (situation.isLosing) shootScore += 5; // Encore plus si on perd
+      } else if (situation.strategy === 'defensive') {
+        shootScore -= 5; // Moins de tirs en mode défensif
+      }
+      
+      // Pénalité si le rôle ne convient pas
+      if (shooter.role === 'DEF') shootScore -= 15;
+      else if (shooter.role === 'MID' && distToGoal > 35) shootScore -= 8;
+      
+      // Coéquipiers mieux placés ?
+      const teammates = updatedPlayers.filter(p => p.team === shooter.team && p.id !== shooter.id);
+      const betterPlaced = teammates.filter(t => {
+        const tDistToGoal = Math.hypot(t.x - goalX, t.y - goalY);
+        return tDistToGoal < distToGoal - 5 && (attacksRight ? t.x > shooter.x : t.x < shooter.x);
+      }).length;
+      if (betterPlaced > 0 && situation.strategy !== 'aggressive') {
+        shootScore -= 8; // Passer plutôt que tirer si coéquipier mieux placé
+      }
+      
+      // Seuil de décision (plus élevé = plus sélectif)
+      const threshold = situation.strategy === 'aggressive' ? 35 : 45;
+      
+      return shootScore > threshold;
+    };
+
     const startShot = (origin: PlayerDot) => {
       const attacksRight = origin.anchorX < 50;
       const goalX = attacksRight ? 99.2 : 0.8;
-      const goalY = 44 + Math.random() * 12;
+      // IA améliorée : viser mieux selon la position
+      const goalCenter = 50;
+      const angleToGoal = Math.atan2(origin.y - goalCenter, Math.abs(origin.x - (attacksRight ? 100 : 0)));
+      // Ajuster la cible selon l'angle (tirer vers le coin opposé si possible)
+      const targetY = goalCenter + Math.sin(angleToGoal) * 8 + (Math.random() - 0.5) * 6;
+      const goalY = Math.max(42, Math.min(58, targetY)); // Limiter dans la surface
+      
       setShots(prev => ({
         home: origin.team === 'home' ? prev.home + 1 : prev.home,
         away: origin.team === 'away' ? prev.away + 1 : prev.away
@@ -751,43 +1213,85 @@ function LiveMatchModal({
     };
 
     const shouldDribble = (carrier: PlayerDot) => {
+      const situation = analyzeMatchSituation(carrier.team);
       const attacksRight = carrier.anchorX < 50;
       const canShootSoon = attacksRight ? carrier.x > 70 : carrier.x < 30;
+      
+      // Toujours dribbler si très proche du but
       if (carrier.x < 15 || carrier.x > 85) return true;
-      if (canShootSoon && Math.random() < 0.4) return true;
+      
+      // Analyse des options de passe
       const teammates = updatedPlayers.filter(p => p.team === carrier.team && p.id !== carrier.id);
       if (teammates.length === 0) return true;
-      const bestScore = Math.max(
-        ...teammates.map(p => {
+      
+      const opponents = updatedPlayers.filter(p => p.team !== carrier.team);
+      const pressureOnCarrier = opponents.filter(opp => 
+        Math.hypot(opp.x - carrier.x, opp.y - carrier.y) < 15
+      ).length;
+      
+      // Si forte pression et stratégie défensive, privilégier la passe
+      if (pressureOnCarrier >= 2 && situation.strategy === 'defensive') {
+        return false;
+      }
+      
+      // Si dans la zone de tir et peu de pression, dribbler vers le but
+      if (canShootSoon && pressureOnCarrier < 2) {
+        const dribbleChance = situation.strategy === 'aggressive' ? 0.5 : 0.3;
+        if (Math.random() < dribbleChance) return true;
+      }
+      
+      // Évaluer la qualité des options de passe
+      const bestPassOption = teammates.reduce((best, p) => {
           const dx = p.x - carrier.x;
           const dy = Math.abs(p.y - carrier.y);
-          return (attacksRight ? dx : -dx) - Math.hypot(dx, dy) * 0.4;
-        })
-      );
-      return bestScore < 5; // si aucun coéquipier intéressant
+        const dist = Math.hypot(dx, dy);
+        const forwardProg = attacksRight ? dx : -dx;
+        const score = forwardProg - dist * 0.4;
+        return score > best.score ? { player: p, score } : best;
+      }, { player: teammates[0], score: -Infinity });
+      
+      // Dribbler si aucune bonne option de passe
+      return bestPassOption.score < (situation.strategy === 'aggressive' ? 8 : 5);
     };
 
     if (!currentPass && !currentShot && owner) {
       decisionCooldownRef.current -= delta * 0.6;
       if (decisionCooldownRef.current <= 0) {
         const attacksRight = owner.anchorX < 50;
-        const canShoot = attacksRight ? owner.x > 78 : owner.x < 22;
-        const shouldShoot = canShoot && Math.random() < 0.6;
-        if (shouldShoot) {
+        
+        // Décision intelligente : tirer ou passer ?
+        const canShoot = attacksRight ? owner.x > 75 : owner.x < 25;
+        const shouldShootDecision = canShoot && shouldShoot(owner);
+        
+        if (shouldShootDecision) {
           startShot(owner);
         } else {
           const target = pickPassTarget(owner);
           if (target && !shouldDribble(owner)) {
             startPass(owner, target);
           } else {
+            // Dribbler intelligemment vers un espace ou le but
+            const situation = analyzeMatchSituation(owner.team);
             const pushDir = attacksRight ? 1 : -1;
-            owner.x = clamp(owner.x + (2.5 + Math.random()) * pushDir, 6, 94);
-            owner.y = clamp(owner.y + (Math.random() - 0.5) * 4, 8, 92);
+            const urgency = situation.urgency;
+            
+            // Vitesse de dribble selon l'urgence
+            const dribbleSpeed = 2 + urgency * 1.5 + Math.random() * 1;
+            owner.x = clamp(owner.x + dribbleSpeed * pushDir, 6, 94);
+            
+            // Variation latérale pour éviter les défenseurs
+            const lateralVariation = (Math.random() - 0.5) * 4;
+            owner.y = clamp(owner.y + lateralVariation, 8, 92);
+            
             ball.ownerId = owner.id;
             ball.team = owner.team;
           }
         }
-        decisionCooldownRef.current = 2 + Math.random() * 1.5;
+        // Cooldown adaptatif selon l'urgence
+        const situation = analyzeMatchSituation(owner.team);
+        const baseCooldown = 2;
+        const adaptiveCooldown = baseCooldown - (situation.urgency * 0.5); // Plus rapide si urgent
+        decisionCooldownRef.current = Math.max(0.8, adaptiveCooldown) + Math.random() * 1;
       }
     }
 
@@ -799,7 +1303,8 @@ function LiveMatchModal({
       }
       const targetPlayer = updatedPlayers.find(p => p.id === pass.targetId);
       const baseTarget = targetPlayer ? { x: targetPlayer.x, y: targetPlayer.y } : pass.start;
-      pass.progress += delta * 0.45;
+      // Vitesse de passe (delta contient déjà le multiplicateur de vitesse)
+      pass.progress += delta * 0.6; // Légèrement augmenté pour plus de fluidité
       const t = Math.min(1, pass.progress);
       const noisyTarget = {
         x: baseTarget.x + pass.error.x * t,
@@ -830,7 +1335,8 @@ function LiveMatchModal({
       }
     } else if (shotRef.current) {
       const shot = shotRef.current;
-      shot.progress += delta * 0.55;
+      // Vitesse de tir (delta contient déjà le multiplicateur de vitesse)
+      shot.progress += delta * 0.7; // Légèrement augmenté pour plus de dynamisme
       const t = Math.min(1, shot.progress);
       ball.x = shot.start.x + (shot.target.x - shot.start.x) * t;
       ball.y = shot.start.y + (shot.target.y - shot.start.y) * t;
@@ -840,19 +1346,21 @@ function LiveMatchModal({
     } else if (owner) {
       const targetX = owner.x;
       const targetY = owner.y;
-      ball.x += (targetX - ball.x) * 0.18 * delta;
-      ball.y += (targetY - ball.y) * 0.18 * delta;
+      // Mouvement du ballon avec le joueur (delta contient déjà le multiplicateur de vitesse)
+      ball.x += (targetX - ball.x) * 0.22 * delta; // Légèrement augmenté
+      ball.y += (targetY - ball.y) * 0.22 * delta;
     }
 
     if (push) {
       const pushTeamSample = updatedPlayers.find(p => p.team === push);
       const pushAttacksRight = (pushTeamSample?.anchorX ?? (push === 'home' ? 30 : 70)) < 50;
+      // Mouvement du ballon après un but (delta contient déjà le multiplicateur de vitesse)
       if (pushAttacksRight) {
-        ball.x += Math.min(2, (100 - ball.x)) * 0.3 * delta;
+        ball.x += Math.min(2, (100 - ball.x)) * 0.35 * delta; // Légèrement augmenté
       } else {
-        ball.x -= Math.min(2, ball.x) * 0.3 * delta;
+        ball.x -= Math.min(2, ball.x) * 0.35 * delta;
       }
-      ball.y += (50 - ball.y) * 0.04 * delta;
+      ball.y += (50 - ball.y) * 0.05 * delta;
     }
     ball.x = Math.max(0.4, Math.min(99.6, ball.x));
     ball.y = Math.max(6, Math.min(94, ball.y));
@@ -882,15 +1390,55 @@ function LiveMatchModal({
       }
     }
 
+    // Détection améliorée des buts : vérifier que le ballon passe réellement la ligne
     if (goalCooldownRef.current > 0) {
       goalCooldownRef.current -= 1 * delta;
-    } else if (ball.x <= 1 && ball.y >= goalTop && ball.y <= goalBottom && pendingGoalsRef.current.away > 0) {
+    } else {
+      // Vérifier but côté gauche (away marque)
+      if (ball.x <= 0.5 && ball.y >= goalTop && ball.y <= goalBottom && pendingGoalsRef.current.away > 0) {
+        // Vérifier que le ballon est en mouvement vers le but (passe la ligne)
+        const wasCrossingLeft = ballSnapshot.x > ball.x;
+        const isInGoal = ball.x < 0.5;
+        
+        if (wasCrossingLeft && isInGoal) {
+          // Vérifier qu'aucun défenseur n'a intercepté
+          const defenders = updatedPlayers.filter(p => 
+            p.team === 'home' && 
+            Math.abs(p.x - ball.x) < 2 && 
+            Math.abs(p.y - ball.y) < 8
+          );
+          
+          // Si pas de défenseur qui intercepte, c'est un but
+          if (defenders.length === 0 || (defenders.length > 0 && Math.random() < 0.3)) {
       handleGoal('away');
-    } else if (ball.x >= 99 && ball.y >= goalTop && ball.y <= goalBottom && pendingGoalsRef.current.home > 0) {
+            goalCooldownRef.current = 3; // Cooldown après un but
+          }
+        }
+      }
+      // Vérifier but côté droit (home marque)
+      else if (ball.x >= 99.5 && ball.y >= goalTop && ball.y <= goalBottom && pendingGoalsRef.current.home > 0) {
+        // Vérifier que le ballon est en mouvement vers le but (passe la ligne)
+        const wasCrossingRight = ballSnapshot.x < ball.x;
+        const isInGoal = ball.x > 99.5;
+        
+        if (wasCrossingRight && isInGoal) {
+          // Vérifier qu'aucun défenseur n'a intercepté
+          const defenders = updatedPlayers.filter(p => 
+            p.team === 'away' && 
+            Math.abs(p.x - ball.x) < 2 && 
+            Math.abs(p.y - ball.y) < 8
+          );
+          
+          // Si pas de défenseur qui intercepte, c'est un but
+          if (defenders.length === 0 || (defenders.length > 0 && Math.random() < 0.3)) {
       handleGoal('home');
+            goalCooldownRef.current = 3; // Cooldown après un but
+          }
+        }
+      }
     }
     ballRef.current = ball;
-  }, [handleGoal, isFinished, showHighlight, highlightVisible, highlightType]);
+  }, [handleGoal, isFinished, showHighlight, highlightVisible, highlightType, homeScore, awayScore]);
 
   const drawFrame = useCallback(() => {
     const canvas = canvasRef.current;
@@ -906,21 +1454,47 @@ function LiveMatchModal({
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, displayWidth, displayHeight);
+    // Terrain de foot (gazon vert avec dégradé)
     const gradient = ctx.createLinearGradient(0, 0, 0, displayHeight);
-    gradient.addColorStop(0, '#0f3a2f');
-    gradient.addColorStop(1, '#071425');
+    gradient.addColorStop(0, '#1a4d3a'); // Vert foncé en haut
+    gradient.addColorStop(0.5, '#2d7a4d'); // Vert moyen au milieu
+    gradient.addColorStop(1, '#1a4d3a'); // Vert foncé en bas
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, displayWidth, displayHeight);
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = 2;
+    
+    // Motif de gazon (lignes horizontales)
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < displayHeight; i += 8) {
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(displayWidth, i);
+      ctx.stroke();
+    }
+    
+    // Lignes du terrain (plus visibles)
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 3;
     ctx.strokeRect(12, 12, displayWidth - 24, displayHeight - 24);
+    
+    // Ligne médiane
     ctx.beginPath();
     ctx.moveTo(displayWidth / 2, 12);
     ctx.lineTo(displayWidth / 2, displayHeight - 12);
     ctx.stroke();
+    
+    // Cercle central (proportionnel à la taille du terrain)
+    ctx.lineWidth = 3;
+    const centerCircleRadius = Math.max(50, Math.min(80, displayWidth / 12)); // Entre 50 et 80px
     ctx.beginPath();
-    ctx.arc(displayWidth / 2, displayHeight / 2, 50, 0, Math.PI * 2);
+    ctx.arc(displayWidth / 2, displayHeight / 2, centerCircleRadius, 0, Math.PI * 2);
     ctx.stroke();
+    
+    // Point central
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.beginPath();
+    ctx.arc(displayWidth / 2, displayHeight / 2, 4, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.2)';
     ctx.fillRect(0, displayHeight / 2 - 30, 12, 60);
     ctx.fillRect(displayWidth - 12, displayHeight / 2 - 30, 12, 60);
@@ -930,28 +1504,79 @@ function LiveMatchModal({
     ctx.strokeRect(displayWidth - 12, displayHeight / 2 - 32, 10, 64);
     const players = playerPositionsRef.current;
     const ball = ballRef.current;
+    
+    // Dessiner les joueurs (points colorés)
     for (const player of players) {
       const x = (player.x / 100) * displayWidth;
       const y = (player.y / 100) * displayHeight;
       const owned = player.id === ball.ownerId;
+      
+      // Dessiner les joueurs avec une taille proportionnelle au terrain
+      // Taille adaptative basée sur la taille du terrain
+      const baseRadius = Math.max(12, Math.min(18, displayWidth / 50)); // Entre 12 et 18px selon la taille
+      const playerRadius = owned ? baseRadius * 1.2 : baseRadius;
+      
       ctx.beginPath();
-      ctx.arc(x, y, owned ? 9 : 7, 0, Math.PI * 2);
+      ctx.arc(x, y, playerRadius, 0, Math.PI * 2);
       ctx.fillStyle = player.team === 'home' ? '#34d399' : '#f87171';
       ctx.fill();
+      
+      // Contour pour mieux voir les joueurs
+      ctx.strokeStyle = player.team === 'home' ? '#22c55e' : '#ef4444';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      
+      // Effet spécial pour le joueur avec le ballon
       if (owned) {
         ctx.shadowColor = '#ffffff';
-        ctx.shadowBlur = 18;
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.shadowBlur = 25;
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 3.5;
         ctx.stroke();
         ctx.shadowBlur = 0;
+        
+        // Cercle de rayon autour du joueur avec le ballon
+        ctx.beginPath();
+        ctx.arc(x, y, playerRadius * 1.8, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
     }
+    // Dessiner le ballon avec une taille proportionnelle
+    const ballX = (ball.x / 100) * displayWidth;
+    const ballY = (ball.y / 100) * displayHeight;
+    // Taille du ballon proportionnelle aux joueurs (environ 60-70% de la taille d'un joueur)
+    const baseRadius = Math.max(12, Math.min(18, displayWidth / 50));
+    const ballRadius = baseRadius * 0.65; // 65% de la taille d'un joueur
+    
     ctx.beginPath();
-    ctx.arc((ball.x / 100) * displayWidth, (ball.y / 100) * displayHeight, 5, 0, Math.PI * 2);
-    ctx.fillStyle = '#f3f4f6';
+    ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
     ctx.shadowColor = '#ffffff';
-    ctx.shadowBlur = 15;
+    ctx.shadowBlur = 25;
     ctx.fill();
+    
+    // Contour du ballon
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Pentagone noir sur le ballon (pour plus de réalisme, taille adaptative)
+    const dotRadius = ballRadius * 0.25;
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(ballX - dotRadius * 1.3, ballY - dotRadius * 0.7, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(ballX + dotRadius * 1.3, ballY - dotRadius * 0.7, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(ballX, ballY + dotRadius * 1.3, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+    
     ctx.shadowBlur = 0;
   }, []);
 
@@ -969,9 +1594,8 @@ function LiveMatchModal({
       const delta = Math.min(1.2, (timestamp - lastFrameRef.current) / 16.67) * speedRef.current;
       lastFrameRef.current = timestamp;
       advanceSimulation(delta);
-      if (highlightVisible) {
+      // Toujours dessiner le terrain pendant le match
         drawFrame();
-      }
       animationFrameRef.current = requestAnimationFrame(loop);
     };
     animationFrameRef.current = requestAnimationFrame(loop);
@@ -1081,15 +1705,41 @@ function LiveMatchModal({
         padding: 16
       }}
     >
+      {/* Affichage "BUT" en gros */}
+      {goalDisplayVisible && goalDisplayTeam && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontSize: '120px',
+            fontWeight: 900,
+            color: goalDisplayTeam === 'home' 
+              ? (homeTeam.logoUrl ? '#fff' : '#22c55e')
+              : (awayTeam.logoUrl ? '#fff' : '#22c55e'),
+            textShadow: '0 0 40px rgba(255,255,255,0.8), 0 0 80px rgba(34,197,94,0.6)',
+            zIndex: 1300,
+            pointerEvents: 'none',
+            animation: 'goalPulse 0.5s ease-out',
+            letterSpacing: '8px'
+          }}
+        >
+          BUT
+        </div>
+      )}
       <div
         className="card"
         style={{
           width: 'min(960px, 95vw)',
           maxHeight: '95vh',
-          overflow: 'hidden',
+          overflowY: 'auto',
+          overflowX: 'hidden',
           padding: 24,
           border: '2px solid var(--border)',
-          position: 'relative'
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column'
         }}
       >
         <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 8 }}>
@@ -1242,11 +1892,10 @@ function LiveMatchModal({
             background: '#021018',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            padding: highlightVisible ? 0 : 24
+            justifyContent: 'center'
           }}
         >
-          {highlightVisible ? (
+          {/* Canvas toujours visible pour afficher le terrain, les joueurs et le ballon */}
             <canvas
               ref={canvasRef}
               style={{
@@ -1257,11 +1906,11 @@ function LiveMatchModal({
                 display: 'block'
               }}
             />
-          ) : (
-            <div style={{ width: '100%', color: 'var(--muted)' }}>
-              <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        </div>
+        {/* Statistiques du match affichées en dessous du terrain */}
+        <div style={{ marginTop: 16, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 160 }}>
-                  <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Possession</div>
+            <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6, color: 'var(--muted)' }}>Possession</div>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontWeight: 700, fontSize: 20 }}>{possession.home}%</div>
@@ -1282,50 +1931,18 @@ function LiveMatchModal({
                     </div>
                   </div>
                 </div>
-                {stageLabel ? (
-                  <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginBottom: 6 }}>
-                    {stageLabel}
-                  </div>
-                ) : null}
-                <div style={{ display: 'flex', flex: 1, minWidth: 160, gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 160, gap: 12, display: 'flex', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, background: 'rgba(255,255,255,0.04)', padding: 12, borderRadius: 10 }}>
-                    <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Tirs</div>
+              <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4, color: 'var(--muted)' }}>Tirs</div>
                     <div style={{ fontSize: 24, fontWeight: 700 }}>{shots.home} - {shots.away}</div>
                   </div>
                   <div style={{ flex: 1, background: 'rgba(255,255,255,0.04)', padding: 12, borderRadius: 10 }}>
-                    <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Temps fort</div>
-                    <div style={{ fontSize: 14 }}>En attente d&apos;un moment clé...</div>
-                  </div>
-                </div>
-                <div style={{ flex: 1, minWidth: 200, background: 'rgba(255,255,255,0.04)', padding: 12, borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Contexte du match</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.4 }}>
-                    <strong>{homeTeam.shortName}</strong> : {describeFormLabel(safeMeta.homeForm)} ({formatFormText(safeMeta.homeForm)})
-                  </div>
-                  <div style={{ fontSize: 14, lineHeight: 1.4 }}>
-                    <strong>{awayTeam.shortName}</strong> : {describeFormLabel(safeMeta.awayForm)} ({formatFormText(safeMeta.awayForm)})
-                  </div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>Analyse basée sur les 5 derniers matches officiels.</div>
-                </div>
-                <div style={{ flex: 1, minWidth: 200, background: 'rgba(255,255,255,0.04)', padding: 12, borderRadius: 10 }}>
-                  <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Projection IA</div>
-                  <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 6 }}>
+              <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4, color: 'var(--muted)' }}>Projection IA</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>
                     {typeof plannedScore.home === 'number' ? plannedScore.home.toFixed(1) : plannedScore.home} - {typeof plannedScore.away === 'number' ? plannedScore.away.toFixed(1) : plannedScore.away}
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                    {safeMeta.homeRank && safeMeta.awayRank
-                      ? safeMeta.homeRank < safeMeta.awayRank
-                        ? `${homeTeam.shortName} part favori`
-                        : safeMeta.homeRank === safeMeta.awayRank
-                          ? 'Duel annoncé équilibré'
-                          : `${awayTeam.shortName} semble favori`
-                      : 'Projection basée sur la note globale des effectifs.'}
                   </div>
                 </div>
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--fg)', fontWeight: 600 }}>Le match se joue, affichage automatique lors des buts ou occasions.</div>
-            </div>
-          )}
         </div>
         <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Moments forts</div>
@@ -2109,12 +2726,23 @@ export default function MatchDay({ state, setState }: Props) {
   };
 
   const handleSimulateDay = () => {
+    // Simuler TOUS les matchs de la journée, y compris celui de l'utilisateur
     if (cupActive && activeCupStage) {
       const { newState, newResults } = simulateCupMatches(state, state.cup.currentStageIndex);
-      setState(newState);
+      // Vérifier si le stage est terminé
+      const stageCompleted = newState.cup.stages[newState.cup.currentStageIndex].matches.every(
+        m => m.homeGoals != null && m.awayGoals != null
+      );
+      if (stageCompleted) {
+        const updatedState = completeCupStage(newState, newState.cup.currentStageIndex);
+        setState(updatedState);
+      } else {
+        setState(newState);
+      }
       setResults(newResults);
     } else {
       const { newState, newResults } = simulateLeagueMatches(state);
+      // Passer à la journée suivante
       newState.currentRound += 1;
       setState(newState);
       setResults(newResults);
@@ -2183,7 +2811,53 @@ export default function MatchDay({ state, setState }: Props) {
       {isSeasonFinished ? (
         <div style={{ padding: 24, textAlign: 'center', background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Saison terminée !</div>
-          <div className="muted">Tous les matchs ont été joués.</div>
+          <div className="muted" style={{ marginBottom: 16 }}>Tous les matchs ont été joués.</div>
+          <button
+            onClick={() => {
+              const newState: GameState = JSON.parse(JSON.stringify(state));
+              // Réinitialiser les statistiques de toutes les équipes
+              Object.values(newState.teams).forEach(team => {
+                team.points = 0;
+                team.wins = 0;
+                team.draws = 0;
+                team.losses = 0;
+                team.goalsFor = 0;
+                team.goalsAgainst = 0;
+              });
+              // Générer un nouveau calendrier
+              newState.league.schedule = generateRoundRobinSchedule(newState.league);
+              // Réinitialiser le round
+              newState.currentRound = 1;
+              // Réinitialiser la Coupe de France
+              const allCupTeamIds = newState.league.teamIds;
+              newState.cup = createInitialCupState(allCupTeamIds, userTeamId);
+              
+              // Réinitialiser le compteur de transferts pour la nouvelle saison
+              if (typeof window !== 'undefined') {
+                // Supprimer tous les anciens compteurs de transferts
+                Object.keys(localStorage).forEach(key => {
+                  if (key.startsWith('transfers_count_')) {
+                    localStorage.removeItem(key);
+                  }
+                });
+              }
+              
+              setState(newState);
+            }}
+            style={{
+              padding: '12px 24px',
+              borderRadius: 8,
+              border: 'none',
+              background: 'linear-gradient(90deg, #22c55e, #16a34a)',
+              color: '#fff',
+              fontSize: 15,
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)'
+            }}
+          >
+            Passer à la saison suivante
+          </button>
         </div>
       ) : (
         <>
@@ -2210,7 +2884,7 @@ export default function MatchDay({ state, setState }: Props) {
           </div>
 
           {userMatch && userMatch.homeGoals == null && userMatch.awayGoals == null && (
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 16, display: 'flex', gap: 12, flexDirection: 'column' }}>
               <button
                 onClick={handlePlayUserMatch}
                 style={{
@@ -2227,6 +2901,31 @@ export default function MatchDay({ state, setState }: Props) {
               >
                 Jouer votre match
               </button>
+              {unplayedMatches.length > 1 && (
+                <button
+                  onClick={handleSimulateDay}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    border: '1px solid rgba(251,146,60,0.4)',
+                    background: 'rgba(251,146,60,0.1)',
+                    color: '#fed7aa',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(251,146,60,0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(251,146,60,0.1)';
+                  }}
+                >
+                  ⚡ Simuler toute la journée ({unplayedMatches.length} matchs)
+                </button>
+              )}
             </div>
           )}
           {!userMatch && unplayedMatches.length > 0 && (
@@ -2245,7 +2944,7 @@ export default function MatchDay({ state, setState }: Props) {
                   cursor: 'pointer'
                 }}
               >
-                Simuler la journée
+                ⚡ Simuler la journée ({unplayedMatches.length} matchs)
               </button>
             </div>
           )}

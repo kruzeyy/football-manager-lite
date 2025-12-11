@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { GameState, Team, Player } from '../game/types';
 import { getStadiumForTeam } from '../game/data/stadiums';
+import { getCupStageWinners } from '../game/cup';
+import TrophyModal from './TrophyModal';
 
 interface Props {
   state: GameState;
@@ -8,13 +10,61 @@ interface Props {
 
 export default function Dashboard({ state }: Props) {
   const user: Team = state.teams[state.userTeamId];
+  // Filtrer uniquement les équipes de la ligue choisie
+  const leagueTeamIds = state.league.teamIds;
   const table = Object.values(state.teams)
+    .filter(team => leagueTeamIds.includes(team.id))
     .sort((a, b) => b.points - a.points || (b.goalsFor - b.goalsAgainst) - (a.goalsFor - a.goalsAgainst));
   const rank = table.findIndex(t => t.id === user.id) + 1;
   const gd = user.goalsFor - user.goalsAgainst;
   
   // Détecter si c'est Ligue 1 (61) ou Ligue 2 (62)
   const isLigue2 = /Ligue 62|ligue 2/i.test(state.league.name);
+  
+  // Vérifier si l'utilisateur a gagné la Coupe de France
+  const [showTrophy, setShowTrophy] = useState<{ title: string; subtitle?: string } | null>(null);
+  const trophyShownRef = useRef<{ cup?: string; ligue2?: string }>({});
+  
+  useEffect(() => {
+    // Vérifier la Coupe de France
+    const finalStage = state.cup.stages.find(s => s.id === 'final');
+    if (finalStage && finalStage.completed) {
+      const winners = getCupStageWinners(finalStage);
+      if (winners.length > 0 && winners[0] === state.userTeamId) {
+        // Créer une clé unique basée sur l'ID du match final
+        const finalMatch = finalStage.matches[0];
+        const trophyKey = finalMatch ? `trophy_cup_${finalMatch.id}` : null;
+        
+        if (trophyKey && trophyShownRef.current.cup !== trophyKey) {
+          trophyShownRef.current.cup = trophyKey;
+          setShowTrophy({
+            title: 'Coupe de France',
+            subtitle: `${user.shortName || user.name} remporte la Coupe de France !`
+          });
+        }
+      }
+    }
+    
+    // Vérifier le championnat (Ligue 2 uniquement pour le moment)
+    const totalRounds = Math.max(...state.league.schedule.map(m => m.round), 38);
+    const allMatchesPlayed = state.league.schedule.every(m => m.homeGoals != null && m.awayGoals != null);
+    
+    if (isLigue2 && allMatchesPlayed && rank === 1) {
+      // Créer une clé unique basée sur le dernier match de la saison
+      const lastMatch = state.league.schedule
+        .filter(m => m.round === totalRounds && m.homeGoals != null && m.awayGoals != null)
+        .sort((a, b) => (a.playedAt || '') > (b.playedAt || '') ? -1 : 1)[0];
+      const trophyKey = lastMatch ? `trophy_ligue2_${lastMatch.id}` : null;
+      
+      if (trophyKey && trophyShownRef.current.ligue2 !== trophyKey) {
+        trophyShownRef.current.ligue2 = trophyKey;
+        setShowTrophy({
+          title: 'Ligue 2',
+          subtitle: `${user.shortName || user.name} remporte le championnat !`
+        });
+      }
+    }
+  }, [state.cup.stages, state.league.schedule, state.userTeamId, user.shortName, user.name, isLigue2, rank]);
   
   // Log pour vérifier les joueurs
   useEffect(() => {
@@ -44,59 +94,49 @@ export default function Dashboard({ state }: Props) {
     const byOverallDesc = (a: Player, b: Player) => b.overall - a.overall;
     const playersById = new Map(team.players.map(p => [p.id, p]));
     
-    // Si on a un preferredXI, l'utiliser en priorité
+    // Si on a un preferredXI, l'utiliser directement dans l'ordre exact (sans filtrer par position)
+    // L'ordre dans preferredXI correspond aux slots : 0 = GK, 1-4 = DEF, 5-7 = MID, 8-10 = FWD
     if (team.preferredXI && team.preferredXI.length >= 11) {
       const preferred = team.preferredXI
         .slice(0, 11)
         .map(id => playersById.get(id))
         .filter((p): p is Player => p !== undefined);
       
-      // Extraire les joueurs par poste du preferredXI
-      const preferredGK = preferred.filter(p => p.position === 'GK').slice(0, 1);
-      const preferredDEF = preferred.filter(p => p.position === 'DEF').slice(0, 4);
-      const preferredMID = preferred.filter(p => p.position === 'MID').slice(0, 3);
-      const preferredFWD = preferred.filter(p => p.position === 'FWD').slice(0, 3);
+      // Utiliser l'ordre exact du preferredXI, même si les joueurs ne sont pas à leur position naturelle
+      // Slot 0 = GK, Slots 1-4 = DEF, Slots 5-7 = MID, Slots 8-10 = FWD
+      const gk = preferred.slice(0, 1).filter(Boolean);
+      const def = preferred.slice(1, 5).filter(Boolean);
+      const mid = preferred.slice(5, 8).filter(Boolean);
+      const fwd = preferred.slice(8, 11).filter(Boolean);
       
-      // Compléter avec les meilleurs joueurs disponibles si on n'a pas assez
-      const usedIds = new Set(preferred.map(p => p.id));
-      const available = team.players
-        .filter(p => !usedIds.has(p.id))
-        .sort(byOverallDesc);
-      
-      // Compléter les gardiens si nécessaire
-      const gk = preferredGK.length >= 1 ? preferredGK : 
-        team.players.filter(p => p.position === 'GK').sort(byOverallDesc).slice(0, 1);
-      
-      // Compléter les défenseurs si nécessaire (besoin de 4)
-      let def = [...preferredDEF];
+      // Si certains slots sont vides, compléter avec les meilleurs joueurs disponibles par poste
+      if (gk.length === 0) {
+        const bestGK = team.players.filter(p => p.position === 'GK' && !preferred.includes(p)).sort(byOverallDesc)[0];
+        if (bestGK) gk.push(bestGK);
+      }
       if (def.length < 4) {
         const missing = 4 - def.length;
-        const additionalDef = available
-          .filter(p => p.position === 'DEF')
+        const additionalDef = team.players
+          .filter(p => !preferred.includes(p) && p.position === 'DEF')
+          .sort(byOverallDesc)
           .slice(0, missing);
-        def = [...def, ...additionalDef];
-        additionalDef.forEach(p => usedIds.add(p.id));
+        def.push(...additionalDef);
       }
-      
-      // Compléter les milieux si nécessaire (besoin de 3)
-      let mid = [...preferredMID];
       if (mid.length < 3) {
         const missing = 3 - mid.length;
-        const additionalMid = available
-          .filter(p => !usedIds.has(p.id) && p.position === 'MID')
+        const additionalMid = team.players
+          .filter(p => !preferred.includes(p) && p.position === 'MID')
+          .sort(byOverallDesc)
           .slice(0, missing);
-        mid = [...mid, ...additionalMid];
-        additionalMid.forEach(p => usedIds.add(p.id));
+        mid.push(...additionalMid);
       }
-      
-      // Compléter les attaquants si nécessaire (besoin de 3)
-      let fwd = [...preferredFWD];
       if (fwd.length < 3) {
         const missing = 3 - fwd.length;
-        const additionalFwd = available
-          .filter(p => !usedIds.has(p.id) && p.position === 'FWD')
+        const additionalFwd = team.players
+          .filter(p => !preferred.includes(p) && p.position === 'FWD')
+          .sort(byOverallDesc)
           .slice(0, missing);
-        fwd = [...fwd, ...additionalFwd];
+        fwd.push(...additionalFwd);
       }
       
       return { 
@@ -447,6 +487,14 @@ export default function Dashboard({ state }: Props) {
         </div>
 
       </div>
+      
+      {showTrophy && (
+        <TrophyModal
+          title={showTrophy.title}
+          subtitle={showTrophy.subtitle}
+          onClose={() => setShowTrophy(null)}
+        />
+      )}
     </div>
   );
 }
