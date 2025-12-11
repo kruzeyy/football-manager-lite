@@ -21,12 +21,17 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
+const corsOrigins: (string | RegExp)[] = [
+  'http://localhost:5173', // Développement local
+  /\.vercel\.app$/, // Tous les domaines Vercel
+];
+
+if (process.env.FRONTEND_URL) {
+  corsOrigins.push(process.env.FRONTEND_URL);
+}
+
 app.use(cors({
-  origin: [
-    'http://localhost:5173', // Développement local
-    process.env.FRONTEND_URL, // URL de production (si définie)
-    /\.vercel\.app$/, // Tous les domaines Vercel
-  ].filter(Boolean),
+  origin: corsOrigins,
   credentials: true
 }));
 app.use(express.json());
