@@ -75,7 +75,8 @@ function generateSquad(targetAvg = 72): Player[] {
 
 // Calcule le budget d'une équipe en fonction de sa note (style FIFA)
 // Budgets varient de ~5M€ (équipes faibles) à ~50M€ (grandes équipes)
-export function calculateTeamBudget(strength: number): number {
+// Ajoute une variation aléatoire de ±30% pour plus de diversité
+export function calculateTeamBudget(strength: number, addRandomVariation = true): number {
   // Formule linéaire: budget = base + (strength - 60) * multiplicateur
   // Pour strength 60: ~5M€
   // Pour strength 84: ~50M€
@@ -89,7 +90,13 @@ export function calculateTeamBudget(strength: number): number {
   
   // Calcul linéaire
   const ratio = (clampedStrength - minStrength) / (maxStrength - minStrength);
-  const budget = baseBudget + (maxBudget - baseBudget) * ratio;
+  let budget = baseBudget + (maxBudget - baseBudget) * ratio;
+  
+  // Ajouter une variation aléatoire de ±30% pour plus de diversité
+  if (addRandomVariation) {
+    const variation = (Math.random() - 0.5) * 0.6; // Entre -30% et +30%
+    budget = budget * (1 + variation);
+  }
   
   // Arrondir à 0.5M€ près pour plus de réalisme
   return Math.round(budget / 500_000) * 500_000;

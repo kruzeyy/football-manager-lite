@@ -7,12 +7,13 @@ import TransfersView from './components/TransfersView';
 import StadiumView from './components/StadiumView';
 import type { GameState, SponsorContract, TvDeal } from './game/types';
 import TeamSelect from './components/TeamSelect';
-import { createNewGameFrom, createTeamWithGeneratedSquad } from './game/generator';
+import LeagueSelect from './components/LeagueSelect';
+import { createNewGameFrom } from './game/generator';
 import { createInitialCupState } from './game/cup';
 import { fetchLeagueFromApiFootball, fetchLeagueTeamsFromStandings } from './game/api';
 import { generateRoundRobinSchedule } from './game/schedule';
 import { loadState, saveState, clearState } from './game/storage';
-import { loadLeagueCache, saveLeagueCache } from './game/cache';
+import { loadLeagueCache, saveLeagueCache, clearAllLeagueCache } from './game/cache';
 import './index.css';
 import type { League, Team } from './game/types';
 
@@ -38,7 +39,70 @@ const SPONSOR_OPTIONS: SponsorContract[] = [
     name: 'Nike',
     bonus: 9_500_000,
     duration: '3 ans',
-    description: 'Équipementier mondial, attente d’un jeu spectaculaire.'
+    description: 'Équipementier mondial, attente d\'un jeu spectaculaire.'
+  },
+  {
+    id: 'adidas',
+    name: 'Adidas',
+    bonus: 8_500_000,
+    duration: '3 ans',
+    description: 'Équipementier historique, expertise technique reconnue.'
+  },
+  {
+    id: 'puma',
+    name: 'Puma',
+    bonus: 4_500_000,
+    duration: '2 ans',
+    description: 'Marque dynamique, focus sur la jeunesse et l\'innovation.'
+  },
+  {
+    id: 'orange',
+    name: 'Orange',
+    bonus: 6_000_000,
+    duration: '2 ans',
+    description: 'Opérateur télécom, partenaire digital majeur.'
+  },
+  {
+    id: 'carrefour',
+    name: 'Carrefour',
+    bonus: 3_000_000,
+    duration: '1 an',
+    description: 'Grande distribution, ancrage local fort.'
+  },
+  {
+    id: 'betclic',
+    name: 'Betclic',
+    bonus: 7_500_000,
+    duration: '2 ans',
+    description: 'Parieur officiel, investissement croissant.'
+  },
+  {
+    id: 'coca-cola',
+    name: 'Coca-Cola',
+    bonus: 5_000_000,
+    duration: '2 ans',
+    description: 'Marque mondiale, sponsoring événementiel.'
+  },
+  {
+    id: 'psg',
+    name: 'Qatar Sports Investments',
+    bonus: 12_000_000,
+    duration: '3 ans',
+    description: 'Investisseur majeur, ambition internationale.'
+  },
+  {
+    id: 'amazon',
+    name: 'Amazon',
+    bonus: 10_000_000,
+    duration: '3 ans',
+    description: 'Tech géant, présence digitale massive.'
+  },
+  {
+    id: 'mcdo',
+    name: 'McDonald\'s',
+    bonus: 3_500_000,
+    duration: '1 an',
+    description: 'Fast-food mondial, proximité avec les supporters.'
   }
 ];
 
@@ -63,13 +127,87 @@ const TV_OPTIONS: TvDeal[] = [
     payout: 6_500_000,
     description: 'Diffusion internationale en continu.',
     expectation: 'Résultats européens espérés'
+  },
+  {
+    id: 'tf1',
+    name: 'TF1',
+    payout: 3_000_000,
+    description: 'Chaine généraliste, audience massive du dimanche.',
+    expectation: 'Performance médiatique attendue'
+  },
+  {
+    id: 'france-tv',
+    name: 'France Télévisions',
+    payout: 2_500_000,
+    description: 'Service public, couverture équitable.',
+    expectation: 'Engagement sportif modéré'
+  },
+  {
+    id: 'm6',
+    name: 'M6',
+    payout: 2_800_000,
+    description: 'Chaine privée, format dynamique.',
+    expectation: 'Objectifs modérés'
+  },
+  {
+    id: 'espn',
+    name: 'ESPN',
+    payout: 8_000_000,
+    description: 'Réseau américain, visibilité internationale.',
+    expectation: 'Excellence et résultats européens'
+  },
+  {
+    id: 'sky-sports',
+    name: 'Sky Sports',
+    payout: 7_000_000,
+    description: 'Diffuseur britannique premium, production soignée.',
+    expectation: 'Performance de haut niveau'
+  },
+  {
+    id: 'dazn',
+    name: 'DAZN',
+    payout: 5_500_000,
+    description: 'Plateforme streaming, approche moderne.',
+    expectation: 'Résultats compétitifs'
+  },
+  {
+    id: 'rmc-sport',
+    name: 'RMC Sport',
+    payout: 4_500_000,
+    description: 'Chaîne sportive française, expertise locale.',
+    expectation: 'Engagement fort'
+  },
+  {
+    id: 'eurosport',
+    name: 'Eurosport',
+    payout: 3_500_000,
+    description: 'Réseau pan-européen, couverture large.',
+    expectation: 'Performance correcte'
+  },
+  {
+    id: 'youtube-tv',
+    name: 'YouTube TV',
+    payout: 5_000_000,
+    description: 'Streaming innovant, nouvelle génération.',
+    expectation: 'Visibilité digitale importante'
   }
 ];
 
 export default function App() {
+  console.log('[fm-lite] 🔄 App function called (component render)');
+  
   const [state, setState] = useState<GameState | null>(null);
+  const [selectedLeague, setSelectedLeague] = useState<{ id: number; name: string } | null>(null);
   const [pending, setPending] = useState<{ teams: Record<string, Team>; league: League } | null>(null);
   const [tab, setTab] = useState<Tab>('dashboard');
+  
+  console.log('[fm-lite] 📊 App render - State values:', {
+    hasState: !!state,
+    selectedLeague,
+    hasPending: !!pending,
+    pendingTeamCount: pending?.league.teamIds.length || 0,
+    tab
+  });
   const [seasonOptions, setSeasonOptions] = useState<{
     sponsors: SponsorContract[];
     tvDeals: TvDeal[];
@@ -79,89 +217,149 @@ export default function App() {
 
   // Saison forcée
   const forcedSeason = 2022;
-  const cacheId = `league-61-${forcedSeason}`;
+  const cacheId = selectedLeague ? `league-${selectedLeague.id}-${forcedSeason}` : `league-61-${forcedSeason}`;
 
   // Garantit un championnat à 20 équipes en complétant si besoin
   const ensureTwentyTeams = (pack: { teams: Record<string, Team>; league: League }): { teams: Record<string, Team>; league: League } => {
     const desired = 20;
     let { teams, league } = pack;
-    const currentIds = [...league.teamIds];
-    if (currentIds.length >= desired) {
-      return { teams, league: { ...league, teamIds: currentIds.slice(0, desired) } };
+    
+    // Filtrer pour garder seulement les équipes valides (pas besoin de vérifier les joueurs, ils seront chargés après)
+    const validTeamIds = league.teamIds.filter(id => {
+      const team = teams[id];
+      return team !== undefined; // Juste vérifier que l'équipe existe
+    });
+    
+    if (validTeamIds.length >= desired) {
+      // On a assez d'équipes, prendre les 20 premières
+      return { teams, league: { ...league, teamIds: validTeamIds.slice(0, desired) } };
     }
-    const missing = desired - currentIds.length;
-    const additions: string[] = [];
-    for (let i = 0; i < missing; i++) {
-      const idx = currentIds.length + i + 1;
-      const extra = createTeamWithGeneratedSquad(`Club ${idx}`, `C${String(idx).padStart(2, '0')}`);
-      teams = { ...teams, [extra.id]: extra };
-      additions.push(extra.id);
+    
+    // Utiliser toutes les équipes disponibles (même si moins de 20)
+    const missing = desired - validTeamIds.length;
+    if (missing > 0) {
+      console.log(`[fm-lite] ℹ️ Using ${validTeamIds.length} teams from API (missing ${missing} to reach ${desired})`);
+    } else {
+      console.log(`[fm-lite] ✅ Using ${validTeamIds.length} teams from API`);
     }
-    league = { ...league, teamIds: [...currentIds, ...additions] };
+    
+    league = { ...league, teamIds: validTeamIds };
     return { teams, league };
   };
 
-  const fetchPendingFromApi = async () => {
+  const fetchPendingFromApi = async (leagueId: number, leagueName: string) => {
+    console.log('[fm-lite] 🔄 fetchPendingFromApi() called - starting API fetch for', leagueName, `(ID: ${leagueId})...`);
     const apiKey = (import.meta as any).env?.VITE_API_FOOTBALL_KEY as string | undefined;
+    const currentCacheId = `league-${leagueId}-${forcedSeason}`;
+    
+    if (!apiKey || apiKey.trim().length === 0) {
+      console.error('[fm-lite] ❌ API key is missing! Cannot fetch players from API.');
+      alert('⚠️ Clé API manquante\n\nVeuillez configurer votre clé API dans les variables d\'environnement.');
+      setSelectedLeague(null); // Réinitialiser pour permettre une nouvelle sélection
+      return;
+    }
+    
     try {
-      if (apiKey && apiKey.trim().length > 0) {
-        console.log('[fm-lite] using API-FOOTBALL with key present (forced season)', forcedSeason);
-        const leagueId = 61;
+      console.log('[fm-lite] ✅ API key present, using API-FOOTBALL (forced season)', forcedSeason);
         // 1) Essai principal: endpoint teams
         try {
+        console.log('[fm-lite] 🔄 Starting API fetch for league...');
           const { teams, league } = await fetchLeagueFromApiFootball(leagueId, forcedSeason, apiKey);
-          const mergedTeams: Record<string, any> = {};
-          const teamIds: string[] = [];
-          for (const id of league.teamIds) {
-            const apiTeam = teams[id];
-            if (!apiTeam) continue;
-            const built = createTeamWithGeneratedSquad(apiTeam.name, apiTeam.shortName, apiTeam.logoUrl);
-            mergedTeams[built.id] = built;
-            teamIds.push(built.id);
-          }
-          if (teamIds.length > 0) {
-            const pendingLeague = { ...league, id: crypto.randomUUID(), teamIds, name: `Ligue 1 (API ${forcedSeason})`, schedule: [] };
-            const pendingPack = ensureTwentyTeams({ teams: mergedTeams, league: pendingLeague });
-            console.log('[fm-lite] pending from API', { count: teamIds.length, season: forcedSeason });
-            setPending(pendingPack);
-            saveLeagueCache(cacheId, pendingPack);
-            return;
-          }
-        } catch {}
+        console.log('[fm-lite] ✅ API fetch completed, checking teams...');
+        
+        // Les équipes n'ont pas de joueurs pour le moment (ils seront chargés après le choix)
+        // Vérifier seulement qu'on a des équipes valides
+        if (league.teamIds.length === 0) {
+          console.warn('[fm-lite] ⚠️ API returned 0 teams');
+          throw new Error('API returned 0 teams');
+        }
+        
+        // Vérifier si on a des équipes valides
+        const validTeams = league.teamIds.filter(id => teams[id] !== undefined);
+        if (validTeams.length === 0) {
+          console.warn('[fm-lite] ⚠️ No valid teams found');
+          throw new Error('No valid teams found');
+        }
+        
+        // Utiliser les équipes valides
+        league.teamIds = validTeams;
+        
+        // Les équipes ont déjà des joueurs générés
+        const pendingLeague = { ...league, id: crypto.randomUUID(), name: `${leagueName} (API ${forcedSeason})`, schedule: [] };
+        const pendingPack = ensureTwentyTeams({ teams, league: pendingLeague });
+        
+        console.log('[fm-lite] ✅ Ready from API with generated players - displaying all teams at once', { 
+          count: league.teamIds.length, 
+          season: forcedSeason
+        });
+        
+        // Mettre à jour l'état avec toutes les équipes
+        setPending(pendingPack);
+        saveLeagueCache(currentCacheId, pendingPack);
+        return;
+        } catch (error) {
+          console.warn('[fm-lite] ⚠️ Error fetching via teams endpoint:', error);
+        }
+        
         // 2) Fallback: standings
         try {
           const viaStandings = await fetchLeagueTeamsFromStandings(leagueId, forcedSeason, apiKey);
-          const mergedTeams2: Record<string, any> = {};
-          const teamIds2: string[] = [];
-          for (const id of viaStandings.league.teamIds) {
-            const apiTeam = viaStandings.teams[id];
-            if (!apiTeam) continue;
-            const built = createTeamWithGeneratedSquad(apiTeam.name, apiTeam.shortName, apiTeam.logoUrl);
-            mergedTeams2[built.id] = built;
-            teamIds2.push(built.id);
+          
+          // Vérifier qu'on a des équipes valides
+          if (viaStandings.league.teamIds.length === 0) {
+            console.warn('[fm-lite] ⚠️ Standings API returned 0 teams');
+            throw new Error('Standings API returned 0 teams');
           }
-          if (teamIds2.length > 0) {
-            const pendingLeague = { ...viaStandings.league, id: crypto.randomUUID(), teamIds: teamIds2, name: `Ligue 1 (API ${forcedSeason})`, schedule: [] };
-            const pendingPack = ensureTwentyTeams({ teams: mergedTeams2, league: pendingLeague });
-            console.log('[fm-lite] pending from API via standings', { count: teamIds2.length, season: forcedSeason });
-            setPending(pendingPack);
-            saveLeagueCache(cacheId, pendingPack);
-            return;
+          
+          const validTeams = viaStandings.league.teamIds.filter(id => viaStandings.teams[id] !== undefined);
+          if (validTeams.length === 0) {
+            console.warn('[fm-lite] ⚠️ No valid teams found in standings');
+            throw new Error('No valid teams found in standings');
           }
-        } catch {}
-        console.warn('[fm-lite] API returned 0 teams for forced season', forcedSeason);
-      }
+          
+          viaStandings.league.teamIds = validTeams;
+          
+          // Les équipes ont déjà des joueurs générés
+          const pendingLeague = { ...viaStandings.league, id: crypto.randomUUID(), name: `${leagueName} (API ${forcedSeason})`, schedule: [] };
+          const pendingPack = ensureTwentyTeams({ teams: viaStandings.teams, league: pendingLeague });
+          
+          console.log('[fm-lite] ✅ Ready from API via standings with generated players - displaying all teams at once', { 
+            count: viaStandings.league.teamIds.length, 
+            season: forcedSeason
+          });
+          
+          setPending(pendingPack);
+          saveLeagueCache(currentCacheId, pendingPack);
+          return;
+        } catch (error) {
+          console.warn('[fm-lite] ⚠️ Error fetching via standings:', error);
+        }
     } catch (e) {
+      const errorMessage = (e as Error)?.message || 'Unknown error';
       console.warn('[fm-lite] API-FOOTBALL failed', e);
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+        console.error('[fm-lite] ❌ API rate limit exceeded. Please wait a moment and try again later.');
+        alert('⚠️ Limite d\'API atteinte\n\nVous avez utilisé toutes vos requêtes API pour aujourd\'hui. Veuillez réessayer demain ou utiliser un autre compte API.');
+      } else {
+        console.error('[fm-lite] ❌ Failed to fetch teams from API:', errorMessage);
+        alert(`⚠️ Erreur API\n\nImpossible de récupérer les équipes depuis l'API.\n\nErreur: ${errorMessage}\n\nVérifiez votre clé API ou réessayez plus tard.`);
+      }
+      // Réinitialiser pour permettre une nouvelle sélection
+      setSelectedLeague(null);
+      setPending(null);
     }
-    setPending({
-      teams: {},
-      league: { id: crypto.randomUUID(), name: 'Aucune ligue chargée', teamIds: [], schedule: [] }
-    });
   };
 
   useEffect(() => {
+    console.log('[fm-lite] 🚀 App component mounted/updated');
+    console.log('[fm-lite] 🔍 Current state:', { 
+      hasState: !!state, 
+      hasPending: !!pending, 
+      selectedLeague: selectedLeague 
+    });
+    
     const loaded = loadState();
+    console.log('[fm-lite] 📦 loadState() result:', loaded ? 'FOUND saved game' : 'NO saved game');
     if (loaded) {
       let upgraded = ensureTeamStats(loaded);
       if (!upgraded.cup) {
@@ -171,17 +369,11 @@ export default function App() {
         };
       }
       upgraded = ensureTeamStats(upgraded);
+      console.log('[fm-lite] ✅ Loading saved game state');
       setState(upgraded);
     } else {
-      // Essaye d'abord l'API-FOOTBALL; sinon on montre un écran vide avec message
-      // 0) tente le cache local (évite des requêtes inutiles)
-      const cached = loadLeagueCache(cacheId, 1000 * 60 * 60 * 24 * 7); // 7 jours
-      if (cached) {
-        console.log('[fm-lite] using cached league', { count: cached.league.teamIds.length });
-        setPending(ensureTwentyTeams(cached));
-        return;
-      }
-      void fetchPendingFromApi();
+      console.log('[fm-lite] ⏳ No saved game, waiting for league selection');
+      // Ne rien faire ici - on attendra que l'utilisateur sélectionne une ligue
     }
   }, []);
 
@@ -191,8 +383,11 @@ export default function App() {
 
   const randomizeContracts = useCallback(() => {
     const shuffle = <T,>(arr: T[]): T[] => arr.slice().sort(() => Math.random() - 0.5);
-    const sponsors = shuffle(SPONSOR_OPTIONS).slice(0, 3);
-    const tvDeals = shuffle(TV_OPTIONS).slice(0, 3);
+    // Sélectionner entre 4 et 6 sponsors aléatoirement
+    const numSponsors = Math.floor(Math.random() * 3) + 4; // 4, 5 ou 6
+    const numTvDeals = Math.floor(Math.random() * 3) + 4; // 4, 5 ou 6
+    const sponsors = shuffle(SPONSOR_OPTIONS).slice(0, numSponsors);
+    const tvDeals = shuffle(TV_OPTIONS).slice(0, numTvDeals);
     setSeasonOptions({ sponsors, tvDeals });
     setSelectedSponsorId(sponsors[0]?.id ?? '');
     setSelectedTvId(tvDeals[0]?.id ?? '');
@@ -202,35 +397,168 @@ export default function App() {
     clearState();
     setState(null);
     randomizeContracts();
-    const cached = loadLeagueCache(cacheId, 1000 * 60 * 60 * 24 * 7);
-    if (cached) {
-      console.log('[fm-lite] using cached league (reset)', { count: cached.league.teamIds.length });
-      setPending(ensureTwentyTeams(cached));
-    } else {
-      setPending({
-        teams: {},
-        league: { id: crypto.randomUUID(), name: 'Aucune ligue chargée', teamIds: [], schedule: [] }
-      });
-      void fetchPendingFromApi();
-    }
+    // Toujours vider le cache pour forcer une nouvelle récupération depuis l'API avec les vrais joueurs de 2022
+    clearAllLeagueCache();
+    setSelectedLeague(null);
+    setPending(null);
+    console.log('[fm-lite] 🔄 Reset: Cache cleared, ready to select league...');
   };
 
-  const startWithTeam = (teamId: string) => {
-    if (!pending) return;
+  const onLeagueSelect = useCallback(async (leagueId: number, leagueName: string) => {
+    console.log('[fm-lite] 📌 League selected:', leagueName, leagueId);
+    setSelectedLeague({ id: leagueId, name: leagueName });
+    setPending(null); // Réinitialiser pending pour éviter les états intermédiaires
+    const currentCacheId = `league-${leagueId}-${forcedSeason}`;
+    
+    console.log('[fm-lite] 🔍 Checking cache for:', currentCacheId);
+    
+    try {
+      // Vérifier le cache pour cette ligue - TOUJOURS utiliser le cache s'il existe
+      const cached = loadLeagueCache(currentCacheId, 1000 * 60 * 60 * 24 * 7); // 7 jours
+      console.log('[fm-lite] 🔍 Cache check result:', cached ? 'FOUND' : 'NOT FOUND');
+      
+      if (cached) {
+        const cachedTeamCount = cached.league.teamIds.length;
+        console.log('[fm-lite] 🔍 Cached teams count:', cachedTeamCount);
+        if (cachedTeamCount >= 20) {
+          console.log('[fm-lite] ✅ Using cached league with generated players (saving API calls)', { 
+            league: leagueName,
+            cachedTeamCount
+          });
+          const pack = ensureTwentyTeams(cached);
+          console.log('[fm-lite] 🔍 Setting pending with pack:', pack);
+          setPending(pack);
+          return;
+        } else {
+          // Cache avec moins de 20 équipes - vider et récupérer depuis l'API
+          console.log(`[fm-lite] ⚠️ Cache has only ${cachedTeamCount} teams (need 20), clearing and fetching from API...`);
+          clearAllLeagueCache();
+          console.log('[fm-lite] 🔍 Cache cleared, checking again...');
+          const cachedAfterClear = loadLeagueCache(currentCacheId, 1000 * 60 * 60 * 24 * 7);
+          console.log('[fm-lite] 🔍 Cache after clear:', cachedAfterClear ? 'STILL EXISTS (BUG!)' : 'CLEARED');
+        }
+      }
+      
+      // Récupérer depuis l'API (cache vide ou invalide)
+      console.log('[fm-lite] 🔄 No valid cache found, fetching from API...');
+      await fetchPendingFromApi(leagueId, leagueName);
+    } catch (error) {
+      console.error('[fm-lite] ❌ Error in onLeagueSelect:', error);
+      setSelectedLeague(null);
+      setPending(null);
+    }
+  }, [forcedSeason]);
+
+  const startWithTeam = useCallback((teamId: string) => {
+    console.log('[fm-lite] 🎯 startWithTeam called with teamId:', teamId);
+    console.log('[fm-lite] 🔍 Current pending:', pending);
+    
+    if (!pending) {
+      console.error('[fm-lite] ❌ Cannot start game: pending is null');
+      alert('Erreur: Aucune ligue sélectionnée. Veuillez sélectionner une ligue d\'abord.');
+      return;
+    }
+    
+    const selectedTeam = pending.teams[teamId];
+    if (!selectedTeam) {
+      console.error('[fm-lite] ❌ Team not found:', teamId, 'Available teams:', Object.keys(pending.teams));
+      alert(`Erreur: Équipe non trouvée (ID: ${teamId})`);
+      return;
+    }
+    
+    console.log('[fm-lite] ✅ Selected team:', selectedTeam.name);
+    console.log('[fm-lite] 🔍 Team has players:', selectedTeam.players?.length || 0);
+    
     randomizeContracts();
-    const game = createNewGameFrom(pending.teams, { ...pending.league, schedule: [] }, teamId);
-    game.league.schedule = generateRoundRobinSchedule(game.league);
-    setState(game);
-    setPending(null);
-    setTab('dashboard');
-  };
+    
+    // Les joueurs sont déjà générés dans les équipes, pas besoin de les charger depuis l'API
+    console.log('[fm-lite] 🔄 Creating game from pending teams...');
+    try {
+      const game = createNewGameFrom(pending.teams, { ...pending.league, schedule: [] }, teamId);
+      console.log('[fm-lite] 🔄 Generating schedule...');
+      game.league.schedule = generateRoundRobinSchedule(game.league);
+      console.log('[fm-lite] ✅ Game created, setting state...');
+      console.log('[fm-lite] 🔍 Game state:', {
+        userTeamId: game.userTeamId,
+        teamCount: Object.keys(game.teams).length,
+        scheduleLength: game.league.schedule.length
+      });
+      
+      setState(game);
+      setPending(null);
+      setTab('dashboard');
+      console.log('[fm-lite] ✅ Game started successfully!');
+    } catch (error) {
+      console.error('[fm-lite] ❌ Error creating game:', error);
+      alert(`Erreur lors de la création de la partie: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
+    }
+  }, [pending, randomizeContracts]);
 
   const content = useMemo(() => {
+    console.log('[fm-lite] 🎨 content useMemo recalculated:', {
+      hasState: !!state,
+      hasPending: !!pending,
+      selectedLeague: selectedLeague
+    });
+    
     if (!state) {
       if (pending) {
-        return <TeamSelect teams={pending.teams} league={pending.league} onSelect={startWithTeam} />;
+        console.log('[fm-lite] 🎨 Rendering TeamSelect');
+        return (
+          <TeamSelect 
+            teams={pending.teams} 
+            league={pending.league} 
+            onSelect={startWithTeam}
+            onBack={() => {
+              console.log('[fm-lite] 🔙 Back button clicked, resetting to league selection');
+              setSelectedLeague(null);
+              setPending(null);
+            }}
+          />
+        );
       }
-      return null;
+      if (!selectedLeague) {
+        console.log('[fm-lite] 🎨 Rendering LeagueSelect');
+        return <LeagueSelect onSelect={onLeagueSelect} />;
+      }
+      // Si selectedLeague est défini mais pending pas encore, afficher un message avec possibilité de réessayer
+      console.log('[fm-lite] 🎨 Rendering loading message for:', selectedLeague.name);
+      return (
+        <div style={{ padding: 24 }}>
+          <p>Chargement des équipes de {selectedLeague.name}...</p>
+          <p style={{ fontSize: '12px', color: '#666' }}>
+            Debug: selectedLeague={JSON.stringify(selectedLeague)}, pending={pending ? 'exists' : 'null'}
+          </p>
+          <div style={{ marginTop: 12, display: 'flex', gap: '8px' }}>
+            <button 
+              onClick={() => {
+                console.log('[fm-lite] 🔄 Force reload from API (ignoring cache)');
+                clearAllLeagueCache();
+                const leagueId = selectedLeague.id;
+                const leagueName = selectedLeague.name;
+                setSelectedLeague(null);
+                setPending(null);
+                // Recharger immédiatement sans vérifier le cache
+                setTimeout(() => {
+                  fetchPendingFromApi(leagueId, leagueName);
+                }, 100);
+              }}
+              style={{ padding: '8px 16px' }}
+            >
+              Forcer le rechargement depuis l'API
+            </button>
+            <button 
+              onClick={() => {
+                setSelectedLeague(null);
+                setPending(null);
+              }}
+              style={{ padding: '8px 16px' }}
+            >
+              Annuler et choisir une autre ligue
+            </button>
+          </div>
+        </div>
+      );
     }
     switch (tab) {
       case 'dashboard':
@@ -248,7 +576,7 @@ export default function App() {
       default:
         return null;
     }
-  }, [state, tab, pending]);
+  }, [state, tab, pending, selectedLeague, onLeagueSelect, startWithTeam]);
 
   const needsContracts = state && (!state.economy?.sponsor || !state.economy?.tvDeal);
   const currentSponsor = seasonOptions.sponsors.find(s => s.id === selectedSponsorId);
@@ -280,7 +608,8 @@ export default function App() {
     }
   }, [state, seasonOptions.sponsors.length, randomizeContracts]);
 
-  if (!state && !pending) return <div style={{ padding: 24 }}>Chargement…</div>;
+  // Ne plus retourner ici - utiliser content à la place qui gère selectedLeague
+  // if (!state && !pending) return <div style={{ padding: 24 }}>Chargement…</div>;
 
   return (
     <div className="app">

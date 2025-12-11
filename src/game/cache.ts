@@ -34,4 +34,17 @@ export function clearLeagueCache(cacheId: string): void {
   }
 }
 
+export function clearAllLeagueCache(): void {
+  try {
+    const keys = Object.keys(localStorage);
+    for (const key of keys) {
+      if (key.startsWith(CACHE_KEY_PREFIX)) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 

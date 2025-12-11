@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { DragEvent } from 'react';
 import type { GameState, Player, Team } from '../game/types';
@@ -249,6 +249,17 @@ export default function SquadView({ state, setState }: Props) {
     () => team.players.slice().sort((a, b) => b.overall - a.overall),
     [team.players]
   );
+  
+  // Log pour vérifier les joueurs
+  useEffect(() => {
+    if (players.length > 0) {
+      console.log(`[SquadView] Team ${team.name} has ${players.length} players. First 3:`, 
+        players.slice(0, 3).map(p => ({ name: p.name, id: p.id, overall: p.overall }))
+      );
+    } else {
+      console.warn(`[SquadView] Team ${team.name} has NO players!`);
+    }
+  }, [team.name, players]);
   const slotOrder = useMemo(() => resolvePreferredXI(team), [team.preferredXI, team.players]);
   const starterIds = useMemo(() => new Set(slotOrder.filter(Boolean)), [slotOrder]);
   const startersCount = Array.from(starterIds).length;
@@ -368,7 +379,7 @@ export default function SquadView({ state, setState }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <h2 style={{ margin: 0 }}>Effectif</h2>
           <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-            {startersCount} / {STARTERS_COUNT} titulaires sélectionnés
+            {startersCount} / {STARTERS_COUNT} titulaires sélectionnés · {players.length} joueurs
           </div>
         </div>
         {feedback && (
